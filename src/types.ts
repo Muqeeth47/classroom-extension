@@ -15,6 +15,8 @@ export interface Classified {
   kind: Kind;
   id: string;
   authuser: string;
+  /** Older shared Drive links carry a resource key that the download needs. */
+  resourcekey?: string;
 }
 
 export interface FileEntry {
@@ -22,6 +24,7 @@ export interface FileEntry {
   kind: FileKind;
   id: string;
   authuser: string;
+  resourcekey?: string;
   /** Link text from Classroom, used as a fallback file name. */
   hint: string;
   label: string;
@@ -69,9 +72,15 @@ export interface ScanItem {
   topic: string;
 }
 
+/** What the user has open: a single post, or a class's Classwork list. Anything else is not scannable. */
+export type PageKind = 'post' | 'class';
+
 export interface ScanResult {
+  mode: PageKind;
   className: string;
   items: ScanItem[];
+  /** Which Google account (/u/N/) Classroom is open under, so files are fetched as the same account. */
+  authuser?: string;
   error?: string;
 }
 
@@ -88,7 +97,7 @@ export interface Prefs {
 
 export type Message =
   | { type: 'GET_STATE' }
-  | { type: 'START'; tabId: number }
+  | { type: 'START'; tabId: number; mode: PageKind }
   | { type: 'DOWNLOAD'; keys: string[]; className: string; byTopic: boolean; docFormat: DocFormat }
   | { type: 'CANCEL' }
   | { type: 'RESET' }

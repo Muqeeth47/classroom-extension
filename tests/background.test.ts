@@ -1,8 +1,8 @@
-// Runs the real background worker against a fake browser API and fake network, end to end:
-// START -> scan -> read posts -> expand a Drive folder -> pick -> download.
+// Runs the real background worker against a fake browser API and fake network, end to end.
+// The fakes are configurable per test so each edge case (blocked files, sign-out, resets...) is exercised.
 
-import { expect, test } from 'vitest';
-import type { AppState, Message, PageLink } from '../src/types';
+import { beforeEach, describe, expect, test } from 'vitest';
+import type { AppState, Message, PageLink, ScanResult } from '../src/types';
 
 // ---- fake extension API -------------------------------------------------------------------
 type Fn = (...args: any[]) => void;
@@ -10,7 +10,9 @@ const listeners: { message: Fn[]; dlChanged: Fn[] } = { message: [], dlChanged: 
 const downloads: { id: number; url: string; filename: string; conflictAction?: string }[] = [];
 const session: { state?: AppState } = {};
 let nextId = 1;
+const calls = { tabsCreate: 0, windowsCreate: 0 };
 
+/** Links "found on the page", keyed by the url of a post opened in a background tab. */
 const POSTS: Record<string, PageLink[]> = {
   'https://classroom.google.com/c/C1/a/P1/details': [
     { href: 'https://drive.google.com/file/d/FILE1/view?usp=classroom_web&authuser=1', text: 'Worksheet.pdf\nPDF' },
@@ -22,6 +24,28 @@ const POSTS: Record<string, PageLink[]> = {
     { href: 'https://drive.google.com/drive/folders/FOLD1', text: 'Reading pack' },
   ],
 };
+
+const OPEN_POST_TAB = 77;
+let openPostLinks: PageLink[] = [];
+let scrapeGate: Promise<void> | null = null; // lets a test hold the scraper to interleave a RESET
+let scanThrows = false;
+let injectThrows = false;
+let scanOverride: ScanResult | null = null;
+let stallDownloads = false; // a download that never finishes (e.g. the browser is asking about a risky file)
+
+const classScan = (): ScanResult => ({
+  mode: 'class',
+  className: 'Physics 12A',
+  items: [
+    { url: 'https://classroom.google.com/c/C1/a/P1/details', title: 'Forces lab', topic: 'Unit 1: Forces' },
+    { url: 'https://classroom.google.com/c/C1/m/P2/details', title: 'Reading', topic: 'Unit 2' },
+  ],
+});
+const postScan = (): ScanResult => ({
+  mode: 'post',
+  className: 'Reading',
+  items: [{ url: 'https://classroom.google.com/c/C1/m/P9/details', title: 'Reading', topic: '' }],
+});
 
 const fakeChrome = {
   storage: {
@@ -35,30 +59,35 @@ const fakeChrome = {
     onMessage: { addListener: (fn: Fn) => listeners.message.push(fn) },
     getPlatformInfo: async () => ({}),
   },
-  windows: { create: async () => ({ id: 99 }), remove: async () => {} },
+  windows: { create: async () => (calls.windowsCreate++, { id: 99 }), remove: async () => {} },
   tabs: {
     // The fake tab id is its URL so the fake scripting API below can look the "page" up.
-    create: async ({ url }: { url: string }) => ({ id: url, url, status: 'complete' }),
+    create: async ({ url }: { url: string }) => (calls.tabsCreate++, { id: url, url, status: 'complete' }),
     remove: async () => {},
     get: async (id: unknown) => ({ id, status: 'complete' }),
     onUpdated: { addListener() {}, removeListener() {} },
-    sendMessage: async () => ({
-      className: 'Physics 12A',
-      items: [
-        { url: 'https://classroom.google.com/c/C1/a/P1/details', title: 'Forces lab', topic: 'Unit 1: Forces' },
-        { url: 'https://classroom.google.com/c/C1/m/P2/details', title: 'Reading', topic: 'Unit 2' },
-      ],
-    }),
+    sendMessage: async (_tabId: number, msg: { mode: string }) => {
+      if (scanThrows) throw new Error('Receiving end does not exist');
+      return scanOverride ?? (msg.mode === 'post' ? postScan() : classScan());
+    },
   },
   scripting: {
-    // In the real extension this runs inside the page; here the "page" result is canned per URL.
-    executeScript: async ({ target }: { target: { tabId: string } }) => [{ result: POSTS[target.tabId] ?? [] }],
+    // In the real extension this runs inside the page; here the "page" result is canned.
+    executeScript: async (opts: { target: { tabId: string | number }; files?: string[] }) => {
+      if (opts.files) {
+        if (injectThrows) throw new Error('Cannot access contents of the page');
+        return [];
+      }
+      if (scrapeGate) await scrapeGate;
+      const id = opts.target.tabId;
+      return [{ result: id === OPEN_POST_TAB ? openPostLinks : (POSTS[String(id)] ?? []) }];
+    },
   },
   downloads: {
     download: async (opts: { url: string; filename: string; conflictAction?: string }) => {
       const id = nextId++;
       downloads.push({ id, ...opts });
-      setTimeout(() => listeners.dlChanged.forEach((f) => f({ id, state: { current: 'complete' } })), 0);
+      if (!stallDownloads) setTimeout(() => listeners.dlChanged.forEach((f) => f({ id, state: { current: 'complete' } })), 0);
       return id;
     },
     onChanged: {
@@ -71,87 +100,301 @@ const fakeChrome = {
 };
 (globalThis as unknown as { chrome: unknown }).chrome = fakeChrome;
 
+// ---- fake network -------------------------------------------------------------------------
 const FOLDER_HTML = `
   <div class="flip-entry" id="entry-F2"><a href="https://drive.google.com/file/d/F2/view"><div class="flip-entry-title">Chapter 1.docx</div></a></div>
   <div class="flip-entry" id="entry-SUB"><a href="https://drive.google.com/drive/folders/SUB1"><div class="flip-entry-title">Extras</div></a></div>`;
 const SUB_HTML = `<div class="flip-entry" id="entry-F3"><a href="https://drive.google.com/file/d/F3/view"><div class="flip-entry-title">Diagram.png</div></a></div>`;
 
 const headers = (h: Record<string, string>) => ({ get: (k: string) => h[k.toLowerCase()] ?? null });
+const ok = (h: Record<string, string>, extra: Record<string, unknown> = {}) => ({ status: 200, headers: headers(h), ...extra });
+const pdf = (name: string) => ok({ 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${name}"` });
+const fetched: string[] = [];
+
 globalThis.fetch = (async (url: unknown) => {
   const u = String(url);
+  fetched.push(u);
   if (u.includes('embeddedfolderview')) {
+    if (u.includes('id=EMPTY')) return { status: 200, text: async () => '<html>sign in</html>', headers: headers({}) };
     return { status: 200, text: async () => (u.includes('id=SUB1') ? SUB_HTML : FOLDER_HTML), headers: headers({}) };
   }
-  if (u.includes('id=FILE1')) {
-    return { status: 200, headers: headers({ 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="Worksheet.pdf"' }) };
-  }
-  if (u.includes('id=F2')) {
-    return { status: 200, headers: headers({ 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="Chapter 1.docx"' }) };
-  }
-  if (u.includes('id=F3')) return { status: 200, headers: headers({ 'content-type': 'text/html' }) }; // owner disabled downloads
-  if (u.includes('/document/d/DOC1/')) {
-    return { status: 200, headers: headers({ 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="Class notes.pdf"' }) };
-  }
+  if (u.includes('id=FILE1')) return pdf('Worksheet.pdf');
+  if (u.includes('id=FILE9')) return pdf('Lecture notes.pdf');
+  if (u.includes('id=F2')) return ok({ 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="Chapter 1.docx"' });
+  if (u.includes('id=F3')) return ok({ 'content-type': 'text/html' }); // owner disabled downloads: Drive sends an HTML page
+  if (u.includes('/document/d/DOC1/')) return pdf('Class notes.pdf');
+  if (u.includes('id=HTMLUPLOAD')) return ok({ 'content-type': 'text/html', 'content-disposition': 'attachment; filename="page.html"' }); // a real .html upload
+  if (u.includes('id=SIGNEDOUT')) return ok({ 'content-type': 'text/html' }, { url: 'https://accounts.google.com/v3/signin' });
+  if (u.includes('id=NETFAIL')) throw new TypeError('Failed to fetch');
+  if (u.includes('id=BUSY')) return { status: 429, headers: headers({}) };
+  if (u.includes('id=OLDKEY')) return pdf('Old.pdf');
+  if (u.includes('id=ACCT')) return pdf('Account.pdf');
   return { status: 404, headers: headers({}) };
 }) as unknown as typeof fetch;
 
+// ---- helpers ------------------------------------------------------------------------------
 const send = (msg: Message) =>
   new Promise<AppState>((resolve) => {
     listeners.message.forEach((fn) => fn(msg, {}, resolve));
   });
 
 async function until(pred: (s: AppState) => boolean, label: string): Promise<AppState> {
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 300; i++) {
     const s = await send({ type: 'GET_STATE' });
     if (pred(s)) return s;
     await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error(`timed out waiting for: ${label}`);
 }
+const settle = () => new Promise((r) => setTimeout(r, 60));
+
+/** Scan the open post tab with the given links and return the review state. */
+async function scanPost(links: PageLink[], scan: ScanResult | null = null): Promise<AppState> {
+  openPostLinks = links;
+  scanOverride = scan;
+  await send({ type: 'START', tabId: OPEN_POST_TAB, mode: 'post' });
+  return until((x) => x.phase === 'review' || x.phase === 'error', 'review or error');
+}
+
+async function downloadAll(s: AppState, extra: Partial<Extract<Message, { type: 'DOWNLOAD' }>> = {}): Promise<AppState> {
+  await send({ type: 'DOWNLOAD', keys: s.files.map((f) => f.key), className: 'Class', byTopic: true, docFormat: 'pdf', ...extra });
+  return until((x) => x.phase === 'done', 'done phase');
+}
 
 await import('../src/background');
 
-test('scans a class, dedupes, expands folders and reaches review', async () => {
-  await send({ type: 'START', tabId: 1 });
-  const s = await until((x) => x.phase === 'review', 'review phase');
-
-  expect(s.className).toBe('Physics 12A');
-  expect(s.files.map((f) => f.key).sort()).toEqual(['document:DOC1', 'file:F2', 'file:F3', 'file:FILE1']); // FILE1 only once
-  expect(s.skipped).toHaveLength(1);
-  expect(s.skipped[0]?.reason).toMatch(/Form/);
-
-  const f3 = s.files.find((f) => f.id === 'F3');
-  expect(f3?.sub).toEqual(['Reading pack', 'Extras']); // nested folder path preserved
-  expect(f3?.topic).toBe('Unit 2');
-});
-
-test('downloads originals into class/topic/folder paths and reports blocked files', async () => {
-  const s = await send({ type: 'GET_STATE' });
-  await send({
-    type: 'DOWNLOAD',
-    keys: s.files.map((f) => f.key),
-    className: 'Physics: 12A',
-    byTopic: true,
-    docFormat: 'office',
-  });
-  const done = await until((x) => x.phase === 'done', 'done phase');
-
-  expect(downloads.map((d) => d.filename).sort()).toEqual([
-    'Classroom/Physics_ 12A/Unit 1_ Forces/Class notes.docx', // Google Doc exported as Office
-    'Classroom/Physics_ 12A/Unit 1_ Forces/Worksheet.pdf', // original PDF, untouched
-    'Classroom/Physics_ 12A/Unit 2/Reading pack/Chapter 1.docx',
-  ]);
-  expect(downloads.every((d) => d.conflictAction === 'uniquify')).toBe(true);
-  expect(downloads.find((d) => d.filename.endsWith('Class notes.docx'))?.url).toContain('format=docx');
-
-  expect(done.dl.done).toBe(3);
-  expect(done.dl.failed).toBe(1);
-  expect(done.dl.failures[0]?.reason).toMatch(/disabled|no access/i);
-});
-
-test('RESET returns to idle', async () => {
+beforeEach(async () => {
   await send({ type: 'RESET' });
-  const s = await send({ type: 'GET_STATE' });
-  expect(s.phase).toBe('idle');
-  expect(s.files).toHaveLength(0);
+  downloads.length = 0;
+  fetched.length = 0;
+  scrapeGate = null;
+  scanThrows = false;
+  injectThrows = false;
+  scanOverride = null;
+  stallDownloads = false;
+  openPostLinks = [];
+});
+
+// ---- whole-class flow ---------------------------------------------------------------------
+describe('class scan', () => {
+  test('dedupes, expands nested folders and reaches review', async () => {
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const s = await until((x) => x.phase === 'review', 'review phase');
+
+    expect(s.className).toBe('Physics 12A');
+    expect(s.files.map((f) => f.key).sort()).toEqual(['document:DOC1', 'file:F2', 'file:F3', 'file:FILE1']); // FILE1 only once
+    expect(s.skipped.map((k) => k.reason)).toEqual(['Google Form']);
+    const f3 = s.files.find((f) => f.id === 'F3');
+    expect(f3?.sub).toEqual(['Reading pack', 'Extras']); // nested folder path preserved
+    expect(f3?.topic).toBe('Unit 2');
+  });
+
+  test('downloads originals into class/topic/folder paths and reports blocked files', async () => {
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const review = await until((x) => x.phase === 'review', 'review phase');
+    const done = await downloadAll(review, { className: 'Physics: 12A', docFormat: 'office' });
+
+    expect(downloads.map((d) => d.filename).sort()).toEqual([
+      'Classroom/Physics_ 12A/Unit 1_ Forces/Class notes.docx', // Google Doc exported as Office
+      'Classroom/Physics_ 12A/Unit 1_ Forces/Worksheet.pdf', // original PDF, untouched
+      'Classroom/Physics_ 12A/Unit 2/Reading pack/Chapter 1.docx',
+    ]);
+    expect(downloads.every((d) => d.conflictAction === 'uniquify')).toBe(true);
+    expect(downloads.find((d) => d.filename.endsWith('Class notes.docx'))?.url).toContain('format=docx');
+    expect(done.dl).toMatchObject({ done: 3, failed: 1 });
+    expect(done.dl.failures[0]?.reason).toMatch(/disabled|no access/i);
+  });
+
+  test('"sort into topics" off puts everything straight under the class folder', async () => {
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const review = await until((x) => x.phase === 'review', 'review phase');
+    await downloadAll(review, { byTopic: false });
+    expect(downloads.map((d) => d.filename)).toContain('Classroom/Class/Worksheet.pdf');
+  });
+
+  test('an empty or inaccessible Drive folder is reported, not silently dropped', async () => {
+    POSTS['https://classroom.google.com/c/C1/m/P2/details'] = [{ href: 'https://drive.google.com/drive/folders/EMPTY', text: 'Locked folder' }];
+    try {
+      await send({ type: 'START', tabId: 1, mode: 'class' });
+      const s = await until((x) => x.phase === 'review', 'review phase');
+      expect(s.skipped.some((k) => /empty|access/i.test(k.reason) && k.title === 'Locked folder')).toBe(true);
+    } finally {
+      POSTS['https://classroom.google.com/c/C1/m/P2/details'] = [
+        { href: 'https://drive.google.com/file/d/FILE1/view', text: 'Worksheet.pdf' },
+        { href: 'https://drive.google.com/drive/folders/FOLD1', text: 'Reading pack' },
+      ];
+    }
+  });
+});
+
+// ---- single post (the main use) -----------------------------------------------------------
+describe('single post', () => {
+  test('is read in place: no hidden window, no reopened tab', async () => {
+    const before = { ...calls };
+    const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'Lecture notes.pdf' }], postScan());
+    expect(s.files.map((f) => f.key)).toEqual(['file:FILE9']);
+    expect(s.className).toBe('Reading');
+    expect(calls).toEqual(before);
+  });
+
+  test('a post with no attachments ends in review with nothing to download', async () => {
+    const s = await scanPost([]);
+    expect(s.phase).toBe('review');
+    expect(s.files).toHaveLength(0);
+  });
+
+  test('a real .html upload is downloaded; Drive error pages are not', async () => {
+    const s = await scanPost([
+      { href: 'https://drive.google.com/file/d/HTMLUPLOAD/view', text: 'page.html' },
+      { href: 'https://drive.google.com/file/d/SIGNEDOUT/view', text: 'Private' },
+    ]);
+    const done = await downloadAll(s);
+    expect(downloads.map((d) => d.filename)).toEqual(['Classroom/Class/page.html']);
+    expect(done.dl.failures[0]?.reason).toMatch(/signed out/i);
+  });
+
+  test('reports network failure and rate limiting in plain words, saving nothing', async () => {
+    const s = await scanPost([
+      { href: 'https://drive.google.com/file/d/NETFAIL/view', text: 'a' },
+      { href: 'https://drive.google.com/file/d/BUSY/view', text: 'b' },
+    ]);
+    const done = await downloadAll(s);
+    expect(downloads).toHaveLength(0); // fail closed: nothing blindly saved
+    const reasons = done.dl.failures.map((f) => f.reason).join(' | ');
+    expect(reasons).toMatch(/Could not reach Google/);
+    expect(reasons).toMatch(/limiting downloads/);
+  });
+
+  test('older shared links keep their resource key, and Classroom\'s Google account is used', async () => {
+    const s = await scanPost(
+      [
+        { href: 'https://drive.google.com/file/d/OLDKEY/view?resourcekey=0-abc123', text: 'Old.pdf' },
+        { href: 'https://drive.google.com/file/d/ACCT/view', text: 'Account.pdf' },
+      ],
+      { ...postScan(), authuser: '2' },
+    );
+    await downloadAll(s);
+    const old = downloads.find((d) => d.url.includes('id=OLDKEY'))!;
+    expect(old.url).toContain('resourcekey=0-abc123');
+    const acct = downloads.find((d) => d.url.includes('id=ACCT'))!;
+    expect(acct.url).toContain('authuser=2'); // link named no account, so the page's /u/2/ is used
+  });
+
+  test('very deep folder names are shortened so the path stays within limits', async () => {
+    const long = 'x'.repeat(200);
+    const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'n.pdf' }], { ...postScan(), className: long });
+    await downloadAll(s, { className: long });
+    expect(downloads[0]!.filename.length).toBeLessThanOrEqual(190);
+    expect(downloads[0]!.filename.endsWith('.pdf')).toBe(true);
+  });
+});
+
+// ---- errors the user should see plainly ---------------------------------------------------
+describe('errors', () => {
+  test('a page with no posts tells the user what to open', async () => {
+    const s = await scanPost([], { mode: 'class', className: '', items: [] });
+    expect(s.phase).toBe('error');
+    expect(s.error).toMatch(/announcement|post/i);
+  });
+
+  test('a scanner error is passed through', async () => {
+    const s = await scanPost([], { mode: 'class', className: '', items: [], error: 'This page lists several classes.' });
+    expect(s.error).toBe('This page lists several classes.');
+  });
+
+  test('a tab that cannot be read gives a friendly message, not a browser error', async () => {
+    scanThrows = true;
+    injectThrows = true;
+    const s = await scanPost([]);
+    expect(s.phase).toBe('error');
+    expect(s.error).toBe('Could not read the Classroom page. Reload it, then try again.');
+  });
+
+  test('a scanner that was not injected yet is injected and retried', async () => {
+    scanThrows = true;
+    let injected = false;
+    const real = fakeChrome.scripting.executeScript;
+    fakeChrome.scripting.executeScript = async (opts: any) => {
+      if (opts.files) {
+        injected = true;
+        scanThrows = false; // the script now answers
+        return [];
+      }
+      return real(opts);
+    };
+    try {
+      const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }]);
+      expect(injected).toBe(true);
+      expect(s.phase).toBe('review');
+    } finally {
+      fakeChrome.scripting.executeScript = real;
+    }
+  });
+});
+
+// ---- resets and cancels -------------------------------------------------------------------
+describe('start over / cancel', () => {
+  test('"Start over" during a scan is never overwritten by the run it interrupted', async () => {
+    let release!: () => void;
+    scrapeGate = new Promise<void>((r) => (release = r));
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    await until((x) => x.phase === 'collecting', 'collecting');
+
+    await send({ type: 'RESET' });
+    release(); // the old scrape now finishes
+    await settle();
+
+    const s = await send({ type: 'GET_STATE' });
+    expect(s.phase).toBe('idle'); // not resurrected as review/done
+    expect(s.files).toHaveLength(0);
+  });
+
+  test('a new run after a reset is not mixed with the old one', async () => {
+    let release!: () => void;
+    scrapeGate = new Promise<void>((r) => (release = r));
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    await until((x) => x.phase === 'collecting', 'collecting');
+    await send({ type: 'RESET' });
+
+    scrapeGate = null;
+    openPostLinks = [{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }];
+    await send({ type: 'START', tabId: OPEN_POST_TAB, mode: 'post' });
+    release(); // old class scrape wakes up while the new post run is active
+    const s = await until((x) => x.phase === 'review', 'review');
+    await settle();
+
+    const after = await send({ type: 'GET_STATE' });
+    expect(after.files.map((f) => f.key)).toEqual(['file:FILE9']); // none of the class files leaked in
+    expect(s.phase).toBe('review');
+  });
+
+  test('Cancel during a scan returns to the start screen', async () => {
+    let release!: () => void;
+    scrapeGate = new Promise<void>((r) => (release = r));
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    await until((x) => x.phase === 'collecting', 'collecting');
+    await send({ type: 'CANCEL' });
+    release();
+    await until((x) => x.phase === 'idle', 'idle after cancel');
+  });
+
+  test('"Start over" while downloading does not bring the finished screen back', async () => {
+    const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }]);
+    await send({ type: 'DOWNLOAD', keys: s.files.map((f) => f.key), className: 'C', byTopic: true, docFormat: 'pdf' });
+    await send({ type: 'RESET' });
+    await settle();
+    expect((await send({ type: 'GET_STATE' })).phase).toBe('idle');
+  });
+
+  test('Stop ends the run even if one download is stuck', async () => {
+    const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }]);
+    stallDownloads = true;
+    await send({ type: 'DOWNLOAD', keys: s.files.map((f) => f.key), className: 'C', byTopic: true, docFormat: 'pdf' });
+    for (let i = 0; i < 100 && downloads.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(downloads).toHaveLength(1); // started, and will never complete
+
+    await send({ type: 'CANCEL' });
+    const done = await until((x) => x.phase === 'done', 'done after Stop');
+    expect(done.phase).toBe('done');
+  });
 });

@@ -6,6 +6,11 @@ import {
   downloadUrlFor,
   exportExtFor,
   filenameFromDisposition,
+  pageKind,
+  courseIdFromPath,
+  authuserFromPath,
+  buildDownloadPath,
+  describeHttpFailure,
   parseFolderHtml,
   sanitize,
   sanitizeFileName,
@@ -95,6 +100,9 @@ describe('file names', () => {
     expect(buildFileName({ cd: 'attachment; filename="Notes.pdf"', ct: '', kind: 'document', id: 'x', docFormat: 'office' })).toBe('Notes.docx');
     expect(buildFileName({ cd: 'attachment; filename="v1.2 plan"', ct: '', kind: 'document', id: 'x' })).toBe('v1.2 plan.pdf');
     expect(buildFileName({ cd: '', ct: '', hint: '', kind: 'file', id: 'abcdefghijkl' })).toBe('file-abcdefgh');
+    // a numeric tail like ".2" is not an extension, so the real type is added
+    expect(buildFileName({ cd: '', ct: 'application/pdf', hint: 'Version 1.2', kind: 'file', id: 'x' })).toBe('Version 1.2.pdf');
+    expect(buildFileName({ cd: '', ct: 'application/pdf', hint: 'notes.pdf', kind: 'file', id: 'x' })).toBe('notes.pdf');
   });
 });
 
@@ -117,4 +125,86 @@ test('parseFolderHtml reads the embedded folder listing', () => {
   expect(entries[0]).toEqual({ href: 'https://drive.google.com/file/d/AAA/view?usp=drive_web', name: 'Notes & Slides.pdf' });
   expect(entries[1]?.name).toBe('Week 2');
   expect(parseFolderHtml('<html>sign in</html>')).toHaveLength(0);
+});
+
+describe('pageKind', () => {
+  test('a single post is a post, whatever the account number', () => {
+    expect(pageKind('https://classroom.google.com/c/ODc1NDc5MzU2Mjc5/m/ODcwMjA4MzI0ODE1/details')).toBe('post');
+    expect(pageKind('https://classroom.google.com/u/1/c/ABC/a/DEF/details')).toBe('post');
+    expect(pageKind('https://classroom.google.com/c/ABC/sp/DEF')).toBe('post');
+  });
+
+  test('class pages are classes', () => {
+    expect(pageKind('https://classroom.google.com/c/ODc1NDc5MzU2Mjc5')).toBe('class');
+    expect(pageKind('https://classroom.google.com/w/ODc1NDc5MzU2Mjc5/t/all')).toBe('class');
+    expect(pageKind('https://classroom.google.com/u/2/c/ABC/p')).toBe('class');
+  });
+
+  test('pages that list every class are never scanned', () => {
+    expect(pageKind('https://classroom.google.com/h')).toBeNull();
+    expect(pageKind('https://classroom.google.com/h/st')).toBeNull();
+    expect(pageKind('https://classroom.google.com/u/0/h')).toBeNull();
+    expect(pageKind('https://classroom.google.com/a/not-turned-in/all')).toBeNull();
+    expect(pageKind('https://classroom.google.com/')).toBeNull();
+    expect(pageKind('https://example.com/c/ABC/m/DEF/details')).toBeNull();
+    expect(pageKind('nonsense')).toBeNull();
+  });
+
+  test('courseIdFromPath', () => {
+    expect(courseIdFromPath('/c/ABC/m/DEF/details')).toBe('ABC');
+    expect(courseIdFromPath('/u/1/w/XYZ/t/all')).toBe('XYZ');
+    expect(courseIdFromPath('/h')).toBeNull();
+  });
+});
+
+describe('resource keys and announcements', () => {
+  test('older shared links carry their resource key into the download URL', () => {
+    const c = classify('https://drive.google.com/file/d/ABC/view?resourcekey=0-xyz');
+    expect(c).toEqual({ kind: 'file', id: 'ABC', authuser: '', resourcekey: '0-xyz' });
+    expect(downloadUrlFor(c!)).toContain('resourcekey=0-xyz');
+    expect(downloadUrlFor(classify('https://docs.google.com/document/d/D/edit?resourcekey=0-k')!)).toContain('resourcekey=0-k');
+    expect(classify('https://drive.google.com/file/d/ABC/view')).not.toHaveProperty('resourcekey');
+  });
+
+  test('announcement pages (/p/<id>) count as a post; the bare /p tab does not', () => {
+    expect(pageKind('https://classroom.google.com/c/ABC/p/POSTID')).toBe('post');
+    expect(pageKind('https://classroom.google.com/u/1/c/ABC/p/POSTID')).toBe('post');
+    expect(pageKind('https://classroom.google.com/c/ABC/p')).toBe('class');
+  });
+
+  test('authuserFromPath reads the account number', () => {
+    expect(authuserFromPath('/u/2/c/ABC/m/DEF/details')).toBe('2');
+    expect(authuserFromPath('/c/ABC')).toBe('');
+  });
+});
+
+describe('buildDownloadPath', () => {
+  test('short paths are left alone', () => {
+    expect(buildDownloadPath('Classroom', ['Physics', 'Unit 1'], 'a.pdf')).toBe('Classroom/Physics/Unit 1/a.pdf');
+  });
+
+  test('long folder names are shortened to fit, keeping the extension', () => {
+    const p = buildDownloadPath('Classroom', ['c'.repeat(60), 't'.repeat(60), 's'.repeat(60), 'u'.repeat(60)], 'n'.repeat(100) + '.pdf');
+    expect(p.length).toBeLessThanOrEqual(190);
+    expect(p.endsWith('.pdf')).toBe(true);
+    expect(p.split('/')).toHaveLength(6);
+  });
+
+  test('empty and unsafe folders are dropped, never producing "//" or ".."', () => {
+    const p = buildDownloadPath('Classroom', ['', '..', 'a/b', '   '], 'f.txt');
+    expect(p).toBe('Classroom/a_b/f.txt');
+    expect(p).not.toContain('//');
+  });
+});
+
+describe('describeHttpFailure', () => {
+  test.each([
+    [403, /permission/i],
+    [404, /not found/i],
+    [429, /limiting/i],
+    [503, /problem/i],
+    [418, /418/],
+  ])('status %i', (status, re) => {
+    expect(describeHttpFailure(status)).toMatch(re);
+  });
 });

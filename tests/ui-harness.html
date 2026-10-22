@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- Dev-only: renders popup.js against a fake browser API so the layout can be checked in any
      browser at any width. Run `npm run build`, serve the project root over http, then open
-     /tests/ui-harness.html?phase=review  (idle | scanning | collecting | review | downloading | done | error | empty) -->
+     /tests/ui-harness.html?phase=review  (idle | scanning | collecting | review | downloading | done | error | empty)
+     and &tab=class|post|home|none for the idle screen -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -23,15 +24,17 @@
       { key: 'd', kind: 'presentation', label: 'Energy slides', post: 'Reading', topic: 'Unit 2', sub: [] },
       { key: 'e', kind: 'file', label: 'Diagram.png', post: 'Intro', topic: '', sub: [] },
     ];
-    const base = { phase, className: 'Physics 12A', progress: { done: 7, total: 20, label: 'Energy and work' }, files: [], skipped: [], dl: { total: 5, done: 3, failed: 1, failures: [{ name: 'Diagram.png', reason: 'Download disabled by the owner, or no access with this account' }], lastId: 1, folder: 'Classroom/Physics 12A' }, log: ['10:00:01  Scanning 20 posts', '10:00:09  Done: 5 file(s), 1 skipped'], error: 'No posts found. Open the class’s Classwork tab (not Stream), let it finish loading, and try again.' };
+    const base = { phase, className: 'Physics 12A', progress: { done: 7, total: 20, label: 'Energy and work' }, files: [], skipped: [], dl: { total: 5, done: 3, failed: 1, failures: [{ name: 'Diagram.png', reason: 'Download disabled by the owner, or no access with this account' }], lastId: 1, folder: 'Classroom/Physics 12A' }, log: ['10:00:01  Scanning 20 posts', '10:00:09  Done: 5 file(s), 1 skipped'], error: 'No posts found. Open the post or announcement whose files you want, or a class’s Classwork tab, and try again.' };
     if (phase === 'review') { base.files = files; base.skipped = [{ title: 'Exit ticket', reason: 'Google Form' }]; }
     if (phase === 'empty') { base.phase = 'review'; }
-    const onTab = new URLSearchParams(location.search).get('tab') !== 'none';
+    // ?tab=class (default) | post | home | none  -> which page the fake active tab is on
+    const tabKind = new URLSearchParams(location.search).get('tab') || 'class';
+    const TAB_URLS = { class: 'https://classroom.google.com/c/ODc1NDc5MzU2Mjc5', post: 'https://classroom.google.com/c/ODc1NDc5MzU2Mjc5/m/ODcwMjA4MzI0ODE1/details', home: 'https://classroom.google.com/h/st', none: 'https://example.com/' };
     window.chrome = {
-      runtime: { sendMessage: async (m) => (m.type === 'GET_STATE' ? base : { ok: true }) },
+      runtime: { getManifest: () => ({ host_permissions: ['https://classroom.google.com/*', 'https://*.google.com/*'] }), sendMessage: async (m) => (m.type === 'GET_STATE' ? base : { ok: true }) },
       storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
       permissions: { contains: async () => new URLSearchParams(location.search).get('access') !== 'no', request: async () => true },
-      tabs: { query: async () => [onTab ? { id: 1, url: 'https://classroom.google.com/c/abc' } : { id: 2, url: 'https://example.com' }] },
+      tabs: { query: async () => [{ id: 1, url: TAB_URLS[tabKind] }] },
     };
   </script>
   <script src="../dist/popup.js"></script>

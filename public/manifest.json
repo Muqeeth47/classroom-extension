@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ilm",
-  "version": "0.2.0",
-  "description": "Download every file attached to a Google Classroom class in one click, in its original format.",
+  "name": "Ilm - Classroom File Downloader",
+  "version": "1.0.0",
+  "description": "Download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.",
   "minimum_chrome_version": "121",
   "permissions": [
     "downloads",
@@ -33,7 +33,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Download Classroom files"
+    "default_title": "Download files from this Classroom post"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -53,5 +53,6 @@
     "gecko_android": {
       "strict_min_version": "142.0"
     }
-  }
+  },
+  "short_name": "Ilm"
 }

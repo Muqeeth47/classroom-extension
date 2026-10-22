@@ -12,12 +12,14 @@ Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.
 
 ## Use
 
-Open a class in Google Classroom, go to **Classwork**, click Ilm, press **Find files in this class**, then **Download**. Files land in `Downloads/Classroom/<class>/`.
+Open the announcement or post whose files you want, click Ilm, press **Get files from this post**, then **Download**. Files land in `Downloads/Classroom/<name>/`.
+
+To save a whole class, open its **Classwork** tab and press **Get files from this class**.
 
 - Uploaded files are saved exactly as they are. Google Docs, Slides and Sheets are exported as PDF or Word / PowerPoint / Excel (your choice).
 - Drive folders attached to posts are opened too.
 - Files with downloading disabled by their owner are skipped, not bypassed.
-- It runs in your browser with your own login and collects nothing.
+- It runs in your browser with your own login and collects nothing. See the [privacy page](https://ilm-xi.vercel.app/privacy.html).
 
 ## Develop
 
@@ -31,6 +33,13 @@ npm run package   # web-ext-artifacts/ilm.zip
 ```
 
 Pushing a version tag makes GitHub Actions build the zip and attach it to a release. The website is plain HTML/CSS in `docs/`.
+
+## Debug
+
+- **Popup:** right-click the Ilm icon, then **Inspect popup**. The popup also has an **Activity log**.
+- **Background worker:** `chrome://extensions` > Ilm > **service worker** (Firefox: `about:debugging` > Inspect). In its console, `await chrome.storage.session.get('state')` shows the current state.
+- **Scanner:** open DevTools on the Classroom tab; its logs are in that tab's console.
+- After editing, run `npm run build` (or `npm run build -- --watch`) and click the reload icon on the extension's card. Installed copies do not update by themselves; download the new zip or reload the unpacked folder.
 
 ## Contact
 

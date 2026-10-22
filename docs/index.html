@@ -3,9 +3,49 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ilm</title>
-  <meta name="description" content="Download every file from a Google Classroom class in one click, in its original format.">
+  <title>Ilm: Download Google Classroom Files, PDFs & Attachments</title>
+  <meta name="description" content="Free extension to download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.">
+  <meta name="keywords" content="google classroom downloader, download google classroom files, google classroom pdf download, classroom attachments, download all classroom files, google classroom extension">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ilm-xi.vercel.app/">
+  <meta name="theme-color" content="#000000">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ilm.">
+  <meta property="og:title" content="Ilm: Download Google Classroom Files, PDFs & Attachments">
+  <meta property="og:description" content="Free extension to download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.">
+  <meta property="og:url" content="https://ilm-xi.vercel.app/">
+  <meta property="og:image" content="https://ilm-xi.vercel.app/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="ilm. Download every file from your Google Classroom in one click.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Ilm: Download Google Classroom Files, PDFs & Attachments">
+  <meta name="twitter:description" content="Free extension to download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.">
+  <meta name="twitter:image" content="https://ilm-xi.vercel.app/og.png">
+  <script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Ilm - Classroom File Downloader",
+  "alternateName": "ilm.",
+  "description": "Free extension to download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.",
+  "url": "https://ilm-xi.vercel.app/",
+  "applicationCategory": "EducationalApplication",
+  "operatingSystem": "Windows, macOS, Linux",
+  "browserRequirements": "Desktop Chrome, Edge, Brave, Opera or Firefox",
+  "downloadUrl": "https://github.com/Muqeeth47/classroom-extension/releases/latest/download/ilm.zip",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Muqeeth"
+  }
+}</script>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="preload" href="fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <style>
     @font-face {
@@ -39,7 +79,10 @@
       font: 400 15px/1.7 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     main { flex: 1; display: grid; align-content: center; width: 100%; max-width: 680px; margin: 0 auto; padding: 48px 20px; }
-    .brand { align-self: flex-start; padding: 22px 24px; color: var(--fg); font-size: 22px; font-weight: 700; letter-spacing: -0.5px; text-decoration: none; }
+    .top { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; }
+    .brand { color: var(--fg); font-size: 22px; font-weight: 700; letter-spacing: -0.5px; text-decoration: none; }
+    .about { min-height: 44px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+    .about:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 4px; }
     h1 { margin: 0 0 12px; font-size: clamp(28px, 7vw, 44px); line-height: 1.15; font-weight: 700; letter-spacing: -1px; }
     p { margin: 0 0 12px; }
     .lead { margin: 0 0 32px; color: var(--muted); }
@@ -49,6 +92,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 8px;
       min-height: 46px;
       padding: 0 22px;
       border: 1px solid var(--fg);
@@ -67,74 +111,131 @@
     footer { padding: 20px; text-align: center; color: var(--muted); font-size: 12.5px; }
     footer a { color: var(--muted); }
 
+    /* Icons (Lucide, inline so the page makes no extra requests) */
+    .i { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
     /* Popups */
     dialog {
       width: min(440px, calc(100vw - 32px));
+      max-height: calc(100svh - 32px);
+      overflow: auto;
       padding: 24px;
       border: 1px solid var(--fg);
       background: var(--bg);
       color: var(--fg);
       font: inherit;
     }
+    dialog.wide { width: min(560px, calc(100vw - 32px)); }
     dialog::backdrop { background: rgb(0 0 0 / 0.7); }
     dialog h2 { margin: 0 0 16px; font-size: 16px; }
-    dialog ol { margin: 0 0 16px; padding-left: 22px; }
+    dialog h3 { margin: 20px 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+    dialog ol, dialog ul { margin: 0; padding-left: 22px; }
     dialog li { margin: 6px 0; padding-left: 4px; }
     dialog ::marker { color: var(--muted); }
     dialog .small { margin: 0; color: var(--muted); font-size: 13px; }
-    dialog .links { display: grid; gap: 4px; margin: 0 0 20px; }
+    dialog .btn { width: 100%; }
     code { padding: 0 5px; border: 1px solid var(--line); font: inherit; font-size: 0.93em; overflow-wrap: anywhere; }
     .close { position: absolute; top: 8px; right: 8px; min-width: 40px; min-height: 40px; border: 0; background: none; color: var(--fg); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
-    dialog .btn { width: 100%; }
 
-    @media (max-width: 480px) { .btn { width: 100%; } }
+    /* Plain text link used inside popups */
+    .textlink { padding: 0; border: 0; background: none; color: var(--fg); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+    /* Contact rows: all three look the same, plain text with an icon, no buttons */
+    .rows { display: grid; gap: 2px; }
+    .row { display: flex; align-items: center; gap: 14px; min-height: 44px; color: var(--fg); text-decoration: none; overflow-wrap: anywhere; }
+    .row:hover span { text-decoration: underline; text-underline-offset: 4px; }
+
+    @media (max-width: 480px) { main .btn { width: 100%; } }
   </style>
 </head>
 <body>
-  <a class="brand" href="./" aria-label="ilm home">ilm.</a>
+  <header class="top">
+    <a class="brand" href="./" aria-label="ilm home">ilm.</a>
+    <button class="about" type="button" data-open="about">about</button>
+  </header>
 
   <main>
     <h1>Every file from your class. One click.</h1>
-    <p class="lead">Original formats. No zip. Saved to your device.</p>
+    <p class="lead">Download every PDF, document and attachment from Google Classroom. Original formats. No zip. Saved to your device.</p>
     <div class="actions">
       <button class="btn primary" type="button" data-open="get">Download</button>
+      <button class="btn" type="button" data-open="manual">Manual</button>
       <button class="btn" type="button" data-open="contact">Contact</button>
     </div>
   </main>
 
-  <footer>Free and open source (MIT). Not affiliated with Google.</footer>
+  <footer>Free and open source (MIT). Not affiliated with Google. <a href="privacy.html">Privacy</a> &middot; <a href="LICENSES.txt">Licences</a></footer>
 
   <dialog id="get" aria-labelledby="get-title">
     <button class="close" type="button" aria-label="Close" data-close>&times;</button>
-    <h2 id="get-title">Get the extension</h2>
-    <ol>
-      <li>Download and unzip it.</li>
-      <li>Open <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>).</li>
-      <li>Turn on <b>Developer mode</b>.</li>
-      <li>Click <b>Load unpacked</b> and pick the unzipped folder.</li>
-    </ol>
+    <h2 id="get-title">Download</h2>
     <a class="btn primary" href="https://github.com/Muqeeth47/classroom-extension/releases/latest/download/ilm.zip">Download .zip</a>
-    <p class="small" style="margin-top:14px">Firefox: <code>about:debugging</code> &rarr; This Firefox &rarr; Load Temporary Add-on &rarr; <code>manifest.json</code>.</p>
+    <p class="small" style="margin-top:14px">Then follow the <button class="textlink" type="button" data-open="manual">manual</button> to install it.</p>
+  </dialog>
+
+  <dialog id="manual" class="wide" aria-labelledby="manual-title">
+    <button class="close" type="button" aria-label="Close" data-close>&times;</button>
+    <h2 id="manual-title">Manual</h2>
+
+    <p class="small" style="margin-bottom:4px">For desktop browsers: Chrome, Edge, Brave, Opera and Firefox.</p>
+
+    <div>
+      <h3>Install</h3>
+      <ol>
+        <li>Download the zip and unzip it.</li>
+        <li>Open <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>) and turn on <b>Developer mode</b>.</li>
+        <li>Click <b>Load unpacked</b> and pick the unzipped folder.</li>
+        <li>Pin <b>ilm.</b> from the puzzle-piece menu.</li>
+      </ol>
+      <p class="small" style="margin-top:8px">Firefox: <code>about:debugging#/runtime/this-firefox</code> &rarr; <b>Load Temporary Add-on</b> &rarr; pick <code>manifest.json</code>, then press <b>Allow access</b>.</p>
+      <h3>Use</h3>
+      <ol>
+        <li>Open Google Classroom, then open the <b>announcement or post</b> whose files you want. (For a whole class, open its <b>Classwork</b> tab.)</li>
+        <li>Click <b>ilm.</b> and press <b>Get files from this class</b> (or <b>this post</b>).</li>
+        <li>Untick anything you don't want. Rename the folder if you like.</li>
+        <li>Press <b>Download</b>. Files land in <code>Downloads/Classroom/</code> on your computer.</li>
+      </ol>
+    </div>
+  </dialog>
+
+  <dialog id="about" aria-label="About">
+    <button class="close" type="button" aria-label="Close" data-close>&times;</button>
+    <p style="margin:12px 0 4px;font-size:18px;line-height:1.5"><b>Hi, I am Muqeeth.</b><br>I'm an artist.</p>
   </dialog>
 
   <dialog id="contact" aria-labelledby="contact-title">
     <button class="close" type="button" aria-label="Close" data-close>&times;</button>
     <h2 id="contact-title">Contact</h2>
     <p class="small" style="margin-bottom:14px">Want to contribute or reach out? Get in touch.</p>
-    <div class="links">
-      <a href="mailto:muqeethshaikabdul@gmail.com">muqeethshaikabdul@gmail.com</a>
-      <a href="tel:9014249493">9014249493</a>
+    <div class="rows">
+      <a class="row" href="mailto:muqeethshaikabdul@gmail.com">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+        <span>muqeethshaikabdul@gmail.com</span>
+      </a>
+      <a class="row" href="tel:9014249493">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/></svg>
+        <span>9014249493</span>
+      </a>
+      <a class="row" href="https://github.com/Muqeeth47/classroom-extension" target="_blank" rel="noopener">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+        <span>Muqeeth47/classroom-extension</span>
+      </a>
     </div>
-    <a class="btn" href="https://github.com/Muqeeth47/classroom-extension">GitHub</a>
   </dialog>
 
   <script>
-    // Opens/closes the popups. Esc and the backdrop click also close them.
+    // Popups: open buttons, close button, backdrop click and Esc all close them.
     document.querySelectorAll('[data-open]').forEach((b) =>
-      b.addEventListener('click', () => document.getElementById(b.dataset.open).showModal()));
+      b.addEventListener('click', () => {
+        b.closest('dialog')?.close();
+        document.getElementById(b.dataset.open).showModal();
+      }));
     document.querySelectorAll('dialog').forEach((d) => {
       d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) d.close(); });
     });
+
+    // Intro popup: shown every time the page is opened or reloaded. The "about" link reopens it.
+    document.getElementById('about').showModal();
   </script>
 </body>
 </html>

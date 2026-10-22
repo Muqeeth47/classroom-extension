@@ -1,15 +1,18 @@
 // Popup UI. The background worker owns the real state; this renders it and sends commands.
 // Everything from Classroom (file names, topics) is untrusted, so it only ever goes in via textContent.
 
-import { EXPORT_KINDS } from '../lib';
-import type { AppState, DocFormat, FileEntry, Message, Prefs } from '../types';
+import { EXPORT_KINDS, pageKind } from '../lib';
+import { freshState } from '../state';
+import type { AppState, DocFormat, FileEntry, Message, PageKind, Prefs } from '../types';
 
-const HOST_ORIGINS = ['https://classroom.google.com/*', 'https://*.google.com/*', 'https://*.googleusercontent.com/*'];
+// Single source of truth: whatever the manifest asks for is what the Firefox "Allow access" button requests.
+const HOST_ORIGINS = chrome.runtime.getManifest().host_permissions ?? [];
 
 const app = document.getElementById('app')!;
 
 let state: AppState | null = null; // mirror of the background state
-let tab: chrome.tabs.Tab | null = null; // the active tab, if it is Classroom
+let tab: chrome.tabs.Tab | null = null; // the active tab, if it is a Classroom class or post
+let kind: PageKind | null = null; // what that tab is showing
 let hasAccess = true; // Firefox asks for site access separately; Chromium grants it at install
 let className: string | null = null; // folder name being edited in the review step
 const unticked = new Set<string>(); // file keys the user turned off
@@ -34,7 +37,22 @@ function h(tag: string, props: Props = {}, ...children: (Child | Child[])[]): HT
   return el;
 }
 
-const send = <T = unknown>(msg: Message): Promise<T> => chrome.runtime.sendMessage(msg) as Promise<T>;
+// Never throws: if the extension was reloaded or its worker is unavailable we show an error screen instead of a blank popup.
+const send = async <T = unknown>(msg: Message): Promise<T | undefined> => {
+  try {
+    return (await chrome.runtime.sendMessage(msg)) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+function unavailableState(): AppState {
+  return {
+    ...freshState(),
+    phase: 'error',
+    error: 'Could not reach the extension. Reload it from your browser’s extensions page, then open this popup again.',
+  };
+}
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 async function loadPrefs(): Promise<void> {
@@ -56,7 +74,8 @@ async function detectContext(): Promise<void> {
     hasAccess = true;
   }
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  tab = active?.url?.startsWith('https://classroom.google.com/') ? active : null;
+  kind = active?.url ? pageKind(active.url) : null;
+  tab = kind ? (active ?? null) : null;
 }
 
 function progressBar(done: number, total: number): HTMLElement {
@@ -87,31 +106,39 @@ function viewIdle(): HTMLElement[] {
         class: 'primary block',
         text: 'Allow access',
         onclick: async () => {
-          hasAccess = await chrome.permissions.request({ origins: HOST_ORIGINS });
+          try {
+            hasAccess = await chrome.permissions.request({ origins: HOST_ORIGINS });
+          } catch {
+            hasAccess = false;
+          }
           await detectContext();
           render();
         },
       }),
     ];
   }
-  if (!tab) {
+  if (!tab || !kind) {
     return [
       h('div', { class: 'card stack' },
-        h('p', { text: 'Open a class in Google Classroom, then go to its Classwork tab.' }),
-        h('p', { class: 'muted small', text: 'Then click this button again.' }),
+        h('p', { text: 'Open the announcement or post whose files you want to download.' }),
+        h('p', { class: 'muted small', text: 'Then click this button again. To get a whole class, open its Classwork tab instead.' }),
       ),
-      h('button', { class: 'primary block', text: 'Find files in this class', disabled: true }),
+      h('button', { class: 'primary block', text: 'Find files', disabled: true }),
     ];
   }
   const tabId = tab.id;
+  const mode: PageKind = kind;
+  const isPost = mode === 'post';
   return [
-    h('p', { class: 'muted', text: 'Finds every file attached in this class and saves them in their original format. Nothing is zipped.' }),
+    h('p', { class: 'muted', text: isPost ? 'Gets the files attached to this post, in their original format.' : 'Gets every file in this class, in their original format. Nothing is zipped.' }),
     h('button', {
       class: 'primary block',
-      text: 'Find files in this class',
+      text: isPost ? 'Get files from this post' : 'Get files from this class',
       onclick: async () => {
         if (tabId == null) return;
-        await send({ type: 'START', tabId });
+        className = null;
+        unticked.clear();
+        await send({ type: 'START', tabId, mode });
         await refresh();
       },
     }),
@@ -122,7 +149,7 @@ function viewBusy(s: AppState): HTMLElement[] {
   const { done, total, label } = s.progress;
   const scanning = s.phase === 'scanning';
   return [
-    h('p', { text: scanning ? 'Loading the class…' : `Reading posts… ${done} of ${total}` }),
+    h('p', { text: scanning ? 'Reading the page…' : total > 1 ? `Reading posts… ${done} of ${total}` : 'Finding files…' }),
     progressBar(scanning ? 0 : done, total),
     h('p', { class: 'muted small', text: label }),
     h('button', { class: 'block', text: 'Cancel', onclick: () => void send({ type: 'CANCEL' }) }),
@@ -156,8 +183,8 @@ function viewReview(s: AppState): (HTMLElement | null)[] {
   if (!files.length) {
     return [
       h('div', { class: 'card stack' },
-        h('p', { class: 'warn', text: 'No downloadable files were found in this class.' }),
-        h('p', { class: 'muted small', text: 'If you expected some, open the activity log below.' }),
+        h('p', { class: 'warn', text: 'No downloadable files were found here.' }),
+        h('p', { class: 'muted small', text: 'Open the announcement or post that has the attachments, let it finish loading, then try again.' }),
       ),
       h('button', { class: 'block', text: 'Start over', onclick: reset }),
       logBox(s),
@@ -187,10 +214,13 @@ function viewReview(s: AppState): (HTMLElement | null)[] {
       ),
     ),
     list,
-    h('label', { class: 'row' },
-      h('input', { type: 'checkbox', checked: prefs.byTopic, onchange: (e) => { prefs.byTopic = (e.target as HTMLInputElement).checked; savePrefs(); } }),
-      h('span', { text: 'Sort into topic folders' }),
-    ),
+    // Topics only exist when a whole class was scanned; a single post has none.
+    files.some((f) => f.topic)
+      ? h('label', { class: 'row' },
+          h('input', { type: 'checkbox', checked: prefs.byTopic, onchange: (e) => { prefs.byTopic = (e.target as HTMLInputElement).checked; savePrefs(); } }),
+          h('span', { text: 'Sort into topic folders' }),
+        )
+      : null,
   ];
 
   if (files.some((f) => EXPORT_KINDS.has(f.kind))) {
@@ -292,7 +322,7 @@ function render(): void {
 }
 
 async function refresh(): Promise<void> {
-  state = await send<AppState>({ type: 'GET_STATE' });
+  state = (await send<AppState>({ type: 'GET_STATE' })) ?? unavailableState();
   if (state.phase === 'idle') await detectContext();
   render();
 }

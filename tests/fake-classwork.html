@@ -2,8 +2,9 @@
 <!-- Dev-only fixture: a fake Classwork page whose posts lazy-load as you scroll, to exercise
      src/content.ts in a real browser. Run `npm run build`, serve the project root over http, open
      /tests/fake-classwork.html, then in the console run:
-       await new Promise(r => window.__listener({type:'SCAN'}, null, r))
-     Expect 6 posts grouped under 3 topics. (Scroll position is polled rather than relying on scroll events.) -->
+       history.pushState(null, '', '/c/COURSE1/w'); await new Promise(r => window.__listener({type:'SCAN', mode:'class'}, null, r))
+     Expect 6 posts under 3 topics and none from COURSE2. Try pushState('/h') for the home-page error,
+     and mode:'post' for the single-post result. (Scroll position is polled rather than relying on scroll events.) -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -12,6 +13,8 @@
 </head>
 <body>
   <header><h1>Physics 12A</h1></header>
+  <!-- Links to ANOTHER class, like the sidebar / home page / to-do list have. Must never be scanned. -->
+  <nav id="other"><a href="/u/0/c/COURSE2/a/OTHER1/details">History essay</a> <a href="/u/0/c/COURSE2/m/OTHER2/details">Maths notes</a></nav>
   <div id="scroller"><div id="list"></div></div>
   <script>
     window.chrome = { runtime: { onMessage: { addListener: (fn) => { window.__listener = fn; } } } };

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy | Ilm - Classroom File Downloader</title>
+  <meta name="description" content="Ilm collects no data. It runs in your browser with your own Google login and only talks to Google to fetch your own files.">
+  <link rel="canonical" href="https://ilm-xi.vercel.app/privacy.html">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <style>
+    @font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+    @font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+    :root { color-scheme: dark light; --bg: #000; --fg: #fff; --muted: #999; --line: #333; }
+    @media (prefers-color-scheme: light) { :root { --bg: #fff; --fg: #000; --muted: #666; --line: #ccc; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 400 15px/1.75 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .top { padding: 12px 24px; }
+    .brand { color: var(--fg); font-size: 22px; font-weight: 700; letter-spacing: -0.5px; text-decoration: none; }
+    main { max-width: 680px; margin: 0 auto; padding: 24px 20px 64px; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; letter-spacing: -0.5px; }
+    h2 { margin: 32px 0 8px; font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+    p, ul { margin: 0 0 12px; }
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+    .muted { color: var(--muted); }
+    a { color: var(--fg); text-underline-offset: 3px; }
+    code { padding: 0 5px; border: 1px solid var(--line); font: inherit; font-size: 0.93em; overflow-wrap: anywhere; }
+    :focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <header class="top"><a class="brand" href="./" aria-label="ilm home">ilm.</a></header>
+  <main>
+    <h1>Privacy</h1>
+    <p class="muted">Short version: Ilm collects nothing about you.</p>
+
+    <h2>What it does</h2>
+    <p>Ilm reads the Google Classroom page you have open to find the files attached to it, then asks your browser to download them to your device. That is all.</p>
+
+    <h2>Data</h2>
+    <ul>
+      <li>No account, no sign-in, no analytics, no ads, no tracking.</li>
+      <li>Nothing is sent to the developer or to any third-party server. There is no server.</li>
+      <li>Nothing is sold or shared.</li>
+      <li>The only network requests go to Google (<code>classroom.google.com</code>, <code>drive.google.com</code>, <code>docs.google.com</code> and Google's file-download hosts), using your own Google login, to fetch your own files.</li>
+      <li>Files are saved to your device's Downloads folder. Nothing is uploaded or saved to Google Drive.</li>
+      <li>Your choices (folder naming, PDF or Office export) are stored only in your browser on your device.</li>
+    </ul>
+
+    <h2>Why it asks for permissions</h2>
+    <ul>
+      <li><b>Access to Google sites:</b> to read the Classroom page and to fetch the files you ask for.</li>
+      <li><b>Downloads:</b> to save the files to your device.</li>
+      <li><b>Scripting:</b> to read the attachments on the page you have open.</li>
+      <li><b>Storage:</b> to remember progress while the popup is closed, and your choices.</li>
+    </ul>
+
+    <h2>Respecting owners</h2>
+    <p>If a file's owner has disabled downloading, Ilm does not bypass that. The file is listed as skipped.</p>
+
+    <h2>Open source and contact</h2>
+    <p>The full source is public: <a href="https://github.com/Muqeeth47/classroom-extension">github.com/Muqeeth47/classroom-extension</a>.</p>
+    <p>Questions: <a href="mailto:muqeethshaikabdul@gmail.com">muqeethshaikabdul@gmail.com</a></p>
+    <p class="muted">Ilm is not affiliated with or endorsed by Google.</p>
+  </main>
+</body>
+</html>

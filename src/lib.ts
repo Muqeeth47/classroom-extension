@@ -1,6 +1,6 @@
 // Pure helpers shared by the background worker and the tests. No browser-API calls here.
 
-import type { Classified, DocFormat, FileKind, Kind } from './types';
+import type { Classified, DocFormat, FileKind, Kind, PageKind } from './types';
 
 const BAD_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g;
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
@@ -59,19 +59,21 @@ export function classify(href: string): Classified | null {
     return null;
   }
   const authuser = u.searchParams.get('authuser') || '';
+  const resourcekey = u.searchParams.get('resourcekey') || undefined;
+  const withKey = (c: Classified): Classified => (resourcekey ? { ...c, resourcekey } : c);
   let m: RegExpMatchArray | null;
   if (u.hostname === 'drive.google.com') {
-    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1]!, authuser };
+    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return withKey({ kind: 'file', id: m[1]!, authuser });
     if ((m = u.pathname.match(/\/drive\/(?:u\/\d+\/)?folders\/([\w-]+)/))) return { kind: 'folder', id: m[1]!, authuser };
     if (u.pathname === '/open' || u.pathname === '/uc') {
       const id = u.searchParams.get('id');
-      if (id) return { kind: 'file', id, authuser };
+      if (id) return withKey({ kind: 'file', id, authuser });
     }
   } else if (u.hostname === 'docs.google.com') {
     if ((m = u.pathname.match(/\/(document|presentation|spreadsheets)\/(?:u\/\d+\/)?d\/([\w-]+)/))) {
-      return { kind: m[1] as Kind, id: m[2]!, authuser };
+      return withKey({ kind: m[1] as Kind, id: m[2]!, authuser });
     }
-    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1]!, authuser };
+    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return withKey({ kind: 'file', id: m[1]!, authuser });
     if (/\/forms\//.test(u.pathname)) return { kind: 'form', id: '', authuser };
   }
   return null;
@@ -86,7 +88,7 @@ export function exportExtFor(kind: Kind, docFormat: DocFormat = 'pdf'): string {
  * exported as PDF (default) or as Office files (docFormat 'office').
  */
 export function downloadUrlFor(
-  { kind, id, authuser }: { kind: Kind; id: string; authuser?: string },
+  { kind, id, authuser, resourcekey }: { kind: Kind; id: string; authuser?: string; resourcekey?: string },
   docFormat: DocFormat = 'pdf',
 ): string | null {
   const q = new URLSearchParams();
@@ -114,6 +116,7 @@ export function downloadUrlFor(
       return null;
   }
   if (authuser) q.set('authuser', authuser);
+  if (resourcekey) q.set('resourcekey', resourcekey);
   const qs = q.toString();
   return qs ? `${base}?${qs}` : base;
 }
@@ -176,6 +179,12 @@ export interface FileNameInput {
   docFormat?: DocFormat;
 }
 
+/** "notes.pdf" has an extension; "Version 1.2" and "Week 3." do not (a purely numeric tail is not one). */
+function hasRealExtension(name: string): boolean {
+  const ext = name.match(/\.([A-Za-z0-9]{1,8})$/)?.[1];
+  return !!ext && !/^\d+$/.test(ext);
+}
+
 /** Pick the best file name we can: server-provided first, then the link text, then the id. */
 export function buildFileName({ cd, ct, hint, kind, id, docFormat = 'pdf' }: FileNameInput): string {
   let name = filenameFromDisposition(cd);
@@ -186,7 +195,7 @@ export function buildFileName({ cd, ct, hint, kind, id, docFormat = 'pdf' }: Fil
   if (EXPORT_KINDS.has(kind)) {
     // Swap, don't append: a server-supplied "notes.pdf" must become "notes.docx", not "notes.pdf.docx".
     name = name.replace(/\.(pdf|docx?|pptx?|xlsx?)$/i, '') + '.' + exportExtFor(kind, docFormat);
-  } else if (!/\.[A-Za-z0-9]{1,8}$/.test(name)) {
+  } else if (!hasRealExtension(name)) {
     name += extFromMime(ct);
   }
   return sanitizeFileName(name);
@@ -219,4 +228,68 @@ export function parseFolderHtml(html: string): { href: string; name: string }[] 
     if (href) out.push({ href: decodeEntities(href), name: decodeEntities(name || '').trim() });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- Classroom pages
+
+const POST_PATH = /^\/(?:u\/\d+\/)?c\/[^/]+\/(?:a|m|sp|qs|p)\/[^/]+/;
+const CLASS_PATH = /^\/(?:u\/\d+\/)?(?:c|w)\/[^/]+/;
+
+/**
+ * What the given Classroom URL is: a single post, a class page, or neither (home, to-do,
+ * calendar...). Pages that list every class must never be scanned.
+ */
+export function pageKind(href: string): PageKind | null {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.hostname !== 'classroom.google.com') return null;
+  if (POST_PATH.test(u.pathname)) return 'post';
+  if (CLASS_PATH.test(u.pathname)) return 'class';
+  return null;
+}
+
+/** The course id in a Classroom URL (/c/<id>/... or /w/<id>/...), if any. */
+export function courseIdFromPath(pathname: string): string | null {
+  return pathname.match(/^\/(?:u\/\d+\/)?(?:c|w)\/([^/?#]+)/)?.[1] ?? null;
+}
+
+/** The Google account number in a Classroom URL (/u/1/...), or '' for the default account. */
+export function authuserFromPath(pathname: string): string {
+  return pathname.match(/^\/u\/(\d+)\//)?.[1] ?? '';
+}
+
+// ---------------------------------------------------------------- download paths
+
+/**
+ * Join path segments for chrome.downloads, keeping the whole relative path under `budget`
+ * characters. Windows refuses paths over ~260 characters including the Downloads folder, so deep
+ * folder names are shortened (longest first) and, as a last resort, so is the file name.
+ */
+export function buildDownloadPath(root: string, folders: string[], name: string, budget = 190): string {
+  const dirs = folders.map((f) => sanitize(f, 60)).filter(Boolean);
+  let file = name;
+  const total = () => root.length + dirs.reduce((n, d) => n + d.length + 1, 0) + file.length + 1;
+
+  while (total() > budget) {
+    let longest = -1;
+    for (let i = 0; i < dirs.length; i++) if (longest < 0 || dirs[i]!.length > dirs[longest]!.length) longest = i;
+    if (longest < 0 || dirs[longest]!.length <= 10) break;
+    const cut = Math.min(total() - budget, dirs[longest]!.length - 10);
+    dirs[longest] = sanitize(dirs[longest]!.slice(0, dirs[longest]!.length - cut), 60) || '_';
+  }
+  if (total() > budget) file = sanitizeFileName(file, Math.max(24, file.length - (total() - budget)));
+  return [root, ...dirs, file].join('/');
+}
+
+/** Turn an HTTP status into something a student can act on. */
+export function describeHttpFailure(status: number): string {
+  if (status === 401 || status === 403) return 'No permission. The owner may have disabled downloading, or you are signed in with a different Google account.';
+  if (status === 404) return 'File not found. It may have been deleted.';
+  if (status === 429) return 'Google is limiting downloads of this file right now. Try again later.';
+  if (status >= 500) return `Google had a problem (HTTP ${status}). Try again later.`;
+  return `Google refused the download (HTTP ${status}).`;
 }
