@@ -21,7 +21,7 @@ Open a class in Google Classroom, go to **Classwork**, click Ilm, press **Find f
 
 ## Develop
 
-TypeScript + esbuild + Vitest. Node 22.12 or newer.
+TypeScript + esbuild + Vitest.
 
 ```
 npm install
@@ -30,10 +30,12 @@ npm run build     # src/ -> dist/ (load dist/ as the unpacked extension)
 npm run package   # web-ext-artifacts/ilm.zip
 ```
 
-Push a tag like `v0.2.0` and GitHub Actions builds the zip and attaches it to a release. The website is plain HTML/CSS in `docs/`.
+Pushing a version tag makes GitHub Actions build the zip and attach it to a release. The website is plain HTML/CSS in `docs/`.
 
 ## Contact
 
+Want to contribute or reach out? Get in touch:
+
 muqeethshaikabdul@gmail.com, 9014249493
 
-MIT licence. Not affiliated with or endorsed by Google. Website set in [JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL OFL 1.1).
+MIT licence. Not affiliated with or endorsed by Google. Website set in [JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL OFL).
