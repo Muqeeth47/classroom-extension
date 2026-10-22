@@ -1,9 +1,25 @@
 {
-  "name": "classroom-bulk-downloader",
-  "version": "0.1.0",
+  "name": "ilm",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "description": "Download every file attached to a Google Classroom class in one click, in its original format.",
   "scripts": {
-    "test": "node --test tests/"
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "web-ext lint --source-dir dist",
+    "check": "npm run typecheck && npm test && npm run build && npm run lint",
+    "package": "npm run build && web-ext build --source-dir dist --artifacts-dir web-ext-artifacts --filename ilm.zip --overwrite-dest"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "web-ext": "^10.8.0"
   }
 }

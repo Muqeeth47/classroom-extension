@@ -7,3 +7,6 @@ web-ext-artifacts/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local tooling config
+.claude/

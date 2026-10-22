@@ -1,18 +1,17 @@
 <!doctype html>
 <!-- Dev-only: renders popup.js against a fake browser API so the layout can be checked in any
-     browser at any width. Serve the project root over http, then open
+     browser at any width. Run `npm run build`, serve the project root over http, then open
      /tests/ui-harness.html?phase=review  (idle | scanning | collecting | review | downloading | done | error | empty) -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Classroom Downloader</title>
-  <link rel="stylesheet" href="../popup.css">
+  <title>Ilm</title>
+  <link rel="stylesheet" href="../dist/popup.css">
 </head>
 <body>
   <header>
-    <img src="../icons/icon48.png" alt="" width="24" height="24">
-    <h1>Classroom Downloader</h1>
+    <h1>ilm.</h1>
   </header>
   <main id="app" aria-live="polite"></main>
   <script>
@@ -35,6 +34,6 @@
       tabs: { query: async () => [onTab ? { id: 1, url: 'https://classroom.google.com/c/abc' } : { id: 2, url: 'https://example.com' }] },
     };
   </script>
-  <script src="../popup.js" type="module"></script>
+  <script src="../dist/popup.js"></script>
 </body>
 </html>

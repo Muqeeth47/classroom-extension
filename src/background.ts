@@ -4,13 +4,14 @@
 // All progress lives in `state`, mirrored to storage.session, so the popup can close and reopen.
 
 import {
+  buildFileName,
   classify,
   downloadUrlFor,
-  buildFileName,
+  parseFolderHtml,
   sanitize,
   unwrapGoogleRedirect,
-  parseFolderHtml,
-} from './lib.js';
+} from './lib';
+import type { AppState, DocFormat, FileEntry, Message, PageLink, ScanItem, ScanResult } from './types';
 
 const ROOT_FOLDER = 'Classroom';
 const SCAN_CONCURRENCY = 3;
@@ -18,9 +19,12 @@ const DOWNLOAD_CONCURRENCY = 4;
 const MAX_FOLDER_DEPTH = 3;
 const MAX_FOLDER_FILES = 400;
 
-function freshState() {
+type Busy = 'scanning' | 'collecting' | 'downloading';
+const BUSY: readonly string[] = ['scanning', 'collecting', 'downloading'] satisfies Busy[];
+
+function freshState(): AppState {
   return {
-    phase: 'idle', // idle | scanning | collecting | review | downloading | done | error
+    phase: 'idle',
     className: '',
     progress: { done: 0, total: 0, label: '' },
     files: [],
@@ -31,17 +35,17 @@ function freshState() {
   };
 }
 
-let state = freshState();
+let state: AppState = freshState();
 let cancelled = false;
-let keepAliveTimer = null;
+let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
 const ready = (async () => {
   try {
-    const saved = (await chrome.storage.session.get('state')).state;
+    const saved = (await chrome.storage.session.get('state')).state as AppState | undefined;
     if (saved) {
       state = saved;
       // A worker killed mid-run can't resume; say so instead of showing a spinner forever.
-      if (['scanning', 'collecting', 'downloading'].includes(state.phase)) {
+      if (BUSY.includes(state.phase)) {
         state.phase = 'error';
         state.error = 'The browser stopped the extension mid-run. Please start again.';
       }
@@ -51,7 +55,7 @@ const ready = (async () => {
   }
 })();
 
-async function save() {
+async function save(): Promise<void> {
   try {
     await chrome.storage.session.set({ state });
   } catch {
@@ -59,26 +63,28 @@ async function save() {
   }
 }
 
-function log(msg) {
+function log(msg: string): void {
   state.log.push(`${new Date().toLocaleTimeString()}  ${msg}`);
   if (state.log.length > 80) state.log.shift();
 }
 
-function startKeepAlive() {
+function startKeepAlive(): void {
   stopKeepAlive();
-  keepAliveTimer = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
+  keepAliveTimer = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
 }
-function stopKeepAlive() {
+function stopKeepAlive(): void {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = null;
 }
 
+const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 // ---------------------------------------------------------------- messages
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  (async () => {
+chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
+  void (async () => {
     await ready;
-    const busy = ['scanning', 'collecting', 'downloading'].includes(state.phase);
+    const busy = BUSY.includes(state.phase);
     switch (msg?.type) {
       case 'GET_STATE':
         sendResponse(state);
@@ -112,27 +118,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true; // keep the channel open for the async response
 });
 
-async function fail(err) {
+async function fail(err: unknown): Promise<void> {
   stopKeepAlive();
   state.phase = 'error';
-  state.error = String(err?.message || err);
+  state.error = errorMessage(err);
   log(`ERROR ${state.error}`);
   await save();
 }
 
 // ---------------------------------------------------------------- scanning + collecting
 
-async function requestScan(tabId) {
+async function requestScan(tabId: number): Promise<ScanResult | undefined> {
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'SCAN' });
+    return (await chrome.tabs.sendMessage(tabId, { type: 'SCAN' })) as ScanResult | undefined;
   } catch {
     // The tab was open before the extension was installed or reloaded: inject, then retry.
     await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tabId, { type: 'SCAN' });
+    return (await chrome.tabs.sendMessage(tabId, { type: 'SCAN' })) as ScanResult | undefined;
   }
 }
 
-async function start(tabId) {
+async function start(tabId: number): Promise<void> {
   cancelled = false;
   state = freshState();
   state.phase = 'scanning';
@@ -154,36 +160,57 @@ async function start(tabId) {
   await collect(scan.items);
 }
 
-async function collect(items) {
+interface CollectContext {
+  seen: Set<string>;
+  folders: FolderJob[];
+}
+
+interface FolderJob {
+  kind: 'folder';
+  id: string;
+  authuser: string;
+  topic: string;
+  post: string;
+  name: string;
+  sub: string[];
+  depth?: number;
+}
+
+interface LinkMeta {
+  topic: string;
+  post: string;
+  sub?: string[];
+}
+
+async function collect(items: ScanItem[]): Promise<void> {
   state.phase = 'collecting';
   state.progress = { done: 0, total: items.length, label: 'Reading posts…' };
   log(`Scanning ${items.length} posts`);
   await save();
 
   // Scan in a minimised window so tabs don't flash over whatever the user is doing.
-  let windowId;
+  let windowId: number | undefined;
   try {
     const win = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
-    windowId = win.id;
+    windowId = win?.id;
   } catch (e) {
-    log(`Could not create scan window (${e.message}); using background tabs`);
+    log(`Could not create scan window (${errorMessage(e)}); using background tabs`);
   }
 
-  const ctx = { seen: new Set(), folders: [] };
+  const ctx: CollectContext = { seen: new Set(), folders: [] };
   let next = 0;
   let done = 0;
-  const worker = async () => {
+  const worker = async (): Promise<void> => {
     while (!cancelled) {
-      const i = next++;
-      if (i >= items.length) return;
-      const item = items[i];
+      const item = items[next++];
+      if (!item) return;
       try {
         const found = await scrapePost(item, windowId);
         let added = 0;
         for (const link of found) added += addLink(ctx, { topic: item.topic, post: item.title }, link) ? 1 : 0;
         log(`${item.title || item.url}: ${found.length} link(s), ${added} new`);
       } catch (e) {
-        log(`Failed on "${item.title}": ${e.message}`);
+        log(`Failed on "${item.title}": ${errorMessage(e)}`);
       }
       done++;
       state.progress = { done, total: items.length, label: item.title || '' };
@@ -205,31 +232,33 @@ async function collect(items) {
   await save();
 }
 
-async function scrapePost(item, windowId) {
+async function scrapePost(item: ScanItem, windowId: number | undefined): Promise<PageLink[]> {
   const tab = await chrome.tabs.create({
     url: item.url,
     active: false,
     ...(windowId != null ? { windowId } : {}),
   });
+  const tabId = tab.id;
+  if (tabId == null) return [];
   try {
-    await waitForComplete(tab.id, 25000);
+    await waitForComplete(tabId, 25000);
     const [res] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId },
       func: scrapeAttachmentsInPage,
     });
-    return res?.result || [];
+    return res?.result ?? [];
   } finally {
-    chrome.tabs.remove(tab.id).catch(() => {});
+    chrome.tabs.remove(tabId).catch(() => {});
   }
 }
 
-function waitForComplete(tabId, timeoutMs) {
+function waitForComplete(tabId: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const cleanup = () => {
+    const cleanup = (): void => {
       clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
     };
-    const onUpdated = (id, info) => {
+    const onUpdated = (id: number, info: { status?: string }): void => {
       if (id === tabId && info.status === 'complete') {
         cleanup();
         resolve();
@@ -254,15 +283,15 @@ function waitForComplete(tabId, timeoutMs) {
 
 /**
  * Runs INSIDE the Classroom post page (injected via scripting.executeScript), so it must be
- * fully self-contained. Classroom renders attachments client-side, so poll until the links
- * appear and stop changing.
+ * fully self-contained: no imports, no references to anything outside this function.
+ * Classroom renders attachments client-side, so poll until the links appear and stop changing.
  */
-async function scrapeAttachmentsInPage() {
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function scrapeAttachmentsInPage(): Promise<{ href: string; text: string }[]> {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const pick = () => {
-    const out = [];
-    const seen = new Set();
-    for (const a of document.querySelectorAll('a[href]')) {
+    const out: { href: string; text: string }[] = [];
+    const seen = new Set<string>();
+    for (const a of document.querySelectorAll<HTMLAnchorElement>('a[href]')) {
       const href = a.href;
       if (!/^https:\/\/(drive|docs|www)\.google\.com\//.test(href)) continue;
       if (a.closest('header, [role="banner"], [role="navigation"], nav')) continue;
@@ -295,14 +324,13 @@ async function scrapeAttachmentsInPage() {
 
 /**
  * Record one attachment link. Files go to state.files; folders are queued for expansion.
- * @param meta {topic, post, sub?} where sub is the Drive-folder path the file was found in
- * @returns {boolean} true if something new was recorded
+ * @returns true if something new was recorded
  */
-function addLink(ctx, meta, link) {
+function addLink(ctx: CollectContext, meta: LinkMeta, link: PageLink): boolean {
   const href = unwrapGoogleRedirect(link.href);
   const c = classify(href);
   if (!c) return false;
-  const label = (link.text || '').split('\n')[0].trim();
+  const label = (link.text || '').split('\n')[0]!.trim();
 
   if (c.kind === 'form') {
     state.skipped.push({ post: meta.post, title: label || 'Google Form', reason: 'Google Form', href });
@@ -313,10 +341,18 @@ function addLink(ctx, meta, link) {
   ctx.seen.add(key);
 
   if (c.kind === 'folder') {
-    ctx.folders.push({ ...c, ...meta, name: label, sub: [...(meta.sub || []), ...(label ? [label] : [])] });
+    ctx.folders.push({
+      kind: 'folder',
+      id: c.id,
+      authuser: c.authuser,
+      topic: meta.topic,
+      post: meta.post,
+      name: label,
+      sub: [...(meta.sub ?? []), ...(label ? [label] : [])],
+    });
     return true;
   }
-  state.files.push({
+  const entry: FileEntry = {
     key,
     kind: c.kind,
     id: c.id,
@@ -325,19 +361,24 @@ function addLink(ctx, meta, link) {
     label: label || `${c.kind} ${c.id.slice(0, 8)}`,
     post: meta.post || '',
     topic: meta.topic || '',
-    sub: meta.sub || [],
-  });
+    sub: meta.sub ?? [],
+  };
+  state.files.push(entry);
   return true;
 }
 
 /** Drive folders are listed from the plain-HTML embedded view, so no Drive API/OAuth is needed. */
-async function expandFolders(ctx) {
-  const queue = ctx.folders.map((f) => ({ ...f, depth: 1 }));
+async function expandFolders(ctx: CollectContext): Promise<void> {
+  const queue: FolderJob[] = ctx.folders.map((f) => ({ ...f, depth: 1 }));
   let found = 0;
   state.phase = 'collecting';
   while (queue.length && !cancelled && found < MAX_FOLDER_FILES) {
-    const folder = queue.shift();
-    state.progress = { done: state.progress.total, total: state.progress.total, label: `Opening folder: ${folder.name || folder.id}` };
+    const folder = queue.shift()!;
+    state.progress = {
+      done: state.progress.total,
+      total: state.progress.total,
+      label: `Opening folder: ${folder.name || folder.id}`,
+    };
     await save();
     try {
       const qs = new URLSearchParams({ id: folder.id });
@@ -348,16 +389,23 @@ async function expandFolders(ctx) {
       for (const e of entries) {
         const c = classify(e.href);
         if (c?.kind === 'folder') {
-          if (folder.depth < MAX_FOLDER_DEPTH && !ctx.seen.has(`folder:${c.id}`)) {
+          if ((folder.depth ?? 1) < MAX_FOLDER_DEPTH && !ctx.seen.has(`folder:${c.id}`)) {
             ctx.seen.add(`folder:${c.id}`);
-            queue.push({ ...folder, ...c, name: e.name, sub: [...folder.sub, e.name].filter(Boolean), depth: folder.depth + 1 });
+            queue.push({
+              ...folder,
+              id: c.id,
+              authuser: c.authuser,
+              name: e.name,
+              sub: [...folder.sub, e.name].filter(Boolean),
+              depth: (folder.depth ?? 1) + 1,
+            });
           }
         } else if (addLink(ctx, { topic: folder.topic, post: folder.post, sub: folder.sub }, { href: e.href, text: e.name })) {
           found++;
         }
       }
     } catch (e) {
-      log(`Could not open folder "${folder.name || folder.id}": ${e.message}`);
+      log(`Could not open folder "${folder.name || folder.id}": ${errorMessage(e)}`);
       state.skipped.push({ post: folder.post, title: folder.name || 'Drive folder', reason: 'Could not open folder', href: '' });
     }
   }
@@ -365,7 +413,9 @@ async function expandFolders(ctx) {
 
 // ---------------------------------------------------------------- downloading
 
-async function download({ keys, className, byTopic = true, docFormat = 'pdf' }) {
+type DownloadMessage = Extract<Message, { type: 'DOWNLOAD' }>;
+
+async function download({ keys, className, byTopic = true, docFormat = 'pdf' }: DownloadMessage): Promise<void> {
   cancelled = false;
   const chosen = state.files.filter((f) => keys.includes(f.key));
   const classFolder = sanitize(className, 60) || sanitize(state.className, 60) || 'Class';
@@ -377,37 +427,17 @@ async function download({ keys, className, byTopic = true, docFormat = 'pdf' }) 
   startKeepAlive();
 
   let next = 0;
-  const worker = async () => {
+  const worker = async (): Promise<void> => {
     while (!cancelled) {
-      const i = next++;
-      if (i >= chosen.length) return;
-      const file = chosen[i];
+      const file = chosen[next++];
+      if (!file) return;
       try {
-        const url = downloadUrlFor(file, docFormat);
-        const probe = await probeUrl(url);
-        if (probe.blocked) throw new Error(probe.blocked);
-        const name = buildFileName({ cd: probe.cd, ct: probe.ct, hint: file.hint, kind: file.kind, id: file.id, docFormat });
-        const segments = [
-          ROOT_FOLDER,
-          classFolder,
-          byTopic ? sanitize(file.topic, 60) : '',
-          ...(file.sub || []).map((s) => sanitize(s, 60)),
-          name,
-        ].filter(Boolean);
-        const id = await chrome.downloads.download({
-          url,
-          filename: segments.join('/'),
-          conflictAction: 'uniquify',
-          saveAs: false,
-        });
-        const outcome = await waitForDownload(id);
-        if (outcome !== 'complete') throw new Error('Download was interrupted');
-        state.dl.lastId = id;
+        await downloadOne(file, classFolder, byTopic, docFormat);
         state.dl.done++;
       } catch (e) {
         state.dl.failed++;
-        state.dl.failures.push({ name: file.label, post: file.post, reason: String(e.message || e) });
-        log(`Failed "${file.label}": ${e.message || e}`);
+        state.dl.failures.push({ name: file.label, post: file.post, reason: errorMessage(e) });
+        log(`Failed "${file.label}": ${errorMessage(e)}`);
       }
       await save();
     }
@@ -420,11 +450,37 @@ async function download({ keys, className, byTopic = true, docFormat = 'pdf' }) 
   await save();
 }
 
+async function downloadOne(file: FileEntry, classFolder: string, byTopic: boolean, docFormat: DocFormat): Promise<void> {
+  const url = downloadUrlFor(file, docFormat);
+  if (!url) throw new Error('Unsupported file type');
+  const probe = await probeUrl(url);
+  if (probe.blocked) throw new Error(probe.blocked);
+  const name = buildFileName({ cd: probe.cd, ct: probe.ct, hint: file.hint, kind: file.kind, id: file.id, docFormat });
+  const segments = [
+    ROOT_FOLDER,
+    classFolder,
+    byTopic ? sanitize(file.topic, 60) : '',
+    ...file.sub.map((s) => sanitize(s, 60)),
+    name,
+  ].filter(Boolean);
+  const id = await chrome.downloads.download({
+    url,
+    filename: segments.join('/'),
+    conflictAction: 'uniquify',
+    saveAs: false,
+  });
+  const outcome = await waitForDownload(id);
+  if (outcome !== 'complete') throw new Error('Download was interrupted');
+  state.dl.lastId = id;
+}
+
+type Probe = { blocked: string; ct?: undefined; cd?: undefined } | { blocked?: undefined; ct: string; cd: string };
+
 /**
  * Peek at the response headers before committing to a download. Drive answers "no access" and
  * "downloading disabled" with a 200 HTML page, which would otherwise be saved as a junk .html file.
  */
-async function probeUrl(url) {
+async function probeUrl(url: string): Promise<Probe> {
   const ac = new AbortController();
   try {
     const r = await fetch(url, { credentials: 'include', redirect: 'follow', signal: ac.signal });
@@ -441,12 +497,13 @@ async function probeUrl(url) {
   }
 }
 
-function waitForDownload(id) {
+function waitForDownload(id: number): Promise<string> {
   return new Promise((resolve) => {
-    const onChanged = (delta) => {
-      if (delta.id === id && delta.state && delta.state.current !== 'in_progress') {
+    const onChanged = (delta: chrome.downloads.DownloadDelta): void => {
+      const current = delta.state?.current;
+      if (delta.id === id && current && current !== 'in_progress') {
         chrome.downloads.onChanged.removeListener(onChanged);
-        resolve(delta.state.current);
+        resolve(current);
       }
     };
     chrome.downloads.onChanged.addListener(onChanged);

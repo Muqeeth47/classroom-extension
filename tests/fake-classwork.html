@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Dev-only fixture: a fake Classwork page whose posts lazy-load as you scroll, to exercise
+     src/content.ts in a real browser. Run `npm run build`, serve the project root over http, open
+     /tests/fake-classwork.html, then in the console run:
+       await new Promise(r => window.__listener({type:'SCAN'}, null, r))
+     Expect 6 posts grouped under 3 topics. (Scroll position is polled rather than relying on scroll events.) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Physics 12A - Google Classroom</title>
+  <style>body{margin:0} #scroller{height:300px;overflow-y:auto;border:1px solid #888}</style>
+</head>
+<body>
+  <header><h1>Physics 12A</h1></header>
+  <div id="scroller"><div id="list"></div></div>
+  <script>
+    window.chrome = { runtime: { onMessage: { addListener: (fn) => { window.__listener = fn; } } } };
+    const topics = { 'Unit 1: Forces': ['Worksheet 1', 'Lab report'], 'Unit 2: Energy': ['Slides', 'Practice test', 'Notes'], 'Unit 3': ['Quiz prep'] };
+    const all = [];
+    let n = 0;
+    for (const [t, items] of Object.entries(topics)) for (const it of items) all.push({ t, it, id: 'ASG' + n++ });
+    let loaded = 3;
+    function render(upTo) {
+      const list = document.getElementById('list');
+      list.innerHTML = '';
+      let last = '';
+      all.slice(0, upTo).forEach((x) => {
+        if (x.t !== last) { const h = document.createElement('h2'); h.textContent = x.t; list.appendChild(h); last = x.t; }
+        const row = document.createElement('div');
+        row.style.cssText = 'height:90px;border-bottom:1px solid #ccc';
+        row.innerHTML = `<a href="/u/0/c/COURSE1/a/${x.id}/details"><span>${x.it}</span></a> <a href="/u/0/c/COURSE1/a/${x.id}/details"></a>`;
+        list.appendChild(row);
+      });
+    }
+    render(loaded);
+    setInterval(() => {
+      const s = document.getElementById('scroller');
+      if (s.scrollTop + s.clientHeight >= s.scrollHeight - 5 && loaded < all.length) { loaded = Math.min(all.length, loaded + 3); render(loaded); }
+    }, 100);
+  </script>
+  <script src="../dist/content.js"></script>
+</body>
+</html>

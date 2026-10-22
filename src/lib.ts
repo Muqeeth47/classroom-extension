@@ -1,19 +1,21 @@
 // Pure helpers shared by the background worker and the tests. No browser-API calls here.
 
+import type { Classified, DocFormat, FileKind, Kind } from './types';
+
 const BAD_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g;
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
 
 /** Google-native files have no "original" file, so they're exported. */
-export const EXPORT_KINDS = new Set(['document', 'presentation', 'spreadsheets']);
+export const EXPORT_KINDS: ReadonlySet<Kind> = new Set<Kind>(['document', 'presentation', 'spreadsheets']);
 
-const EXPORT_EXT = {
+const EXPORT_EXT: Partial<Record<Kind, Record<DocFormat, string>>> = {
   document: { pdf: 'pdf', office: 'docx' },
   presentation: { pdf: 'pdf', office: 'pptx' },
   spreadsheets: { pdf: 'pdf', office: 'xlsx' },
 };
 
 /** Make a string safe to use as one Windows/macOS/Linux path segment. */
-export function sanitize(s, max = 80) {
+export function sanitize(s: unknown, max = 80): string {
   let out = String(s ?? '').replace(BAD_CHARS, '_').replace(/\s+/g, ' ').trim();
   out = out.replace(/^\.+/, '').replace(/[. ]+$/, '');
   if (out.length > max) out = out.slice(0, max).trim();
@@ -22,7 +24,7 @@ export function sanitize(s, max = 80) {
 }
 
 /** Like sanitize, but keeps a short file extension intact when truncating. */
-export function sanitizeFileName(name, max = 120) {
+export function sanitizeFileName(name: unknown, max = 120): string {
   const s = String(name ?? '');
   const dot = s.lastIndexOf('.');
   const hasExt = dot > 0 && s.length - dot <= 9;
@@ -33,7 +35,7 @@ export function sanitizeFileName(name, max = 120) {
 }
 
 /** Classroom sometimes wraps outbound links in google.com/url?q=… */
-export function unwrapGoogleRedirect(href) {
+export function unwrapGoogleRedirect(href: string): string {
   try {
     const u = new URL(href);
     if (u.hostname === 'www.google.com' && u.pathname === '/url') {
@@ -47,43 +49,49 @@ export function unwrapGoogleRedirect(href) {
 
 /**
  * Work out what a Drive/Docs link points at.
- * Returns {kind, id, authuser} or null if it isn't something we can act on.
- * kind: file | document | presentation | spreadsheets | folder | form
+ * Returns null if it isn't something we can act on.
  */
-export function classify(href) {
-  let u;
+export function classify(href: string): Classified | null {
+  let u: URL;
   try {
     u = new URL(href);
   } catch {
     return null;
   }
   const authuser = u.searchParams.get('authuser') || '';
-  let m;
+  let m: RegExpMatchArray | null;
   if (u.hostname === 'drive.google.com') {
-    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1], authuser };
-    if ((m = u.pathname.match(/\/drive\/(?:u\/\d+\/)?folders\/([\w-]+)/))) return { kind: 'folder', id: m[1], authuser };
+    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1]!, authuser };
+    if ((m = u.pathname.match(/\/drive\/(?:u\/\d+\/)?folders\/([\w-]+)/))) return { kind: 'folder', id: m[1]!, authuser };
     if (u.pathname === '/open' || u.pathname === '/uc') {
       const id = u.searchParams.get('id');
       if (id) return { kind: 'file', id, authuser };
     }
   } else if (u.hostname === 'docs.google.com') {
     if ((m = u.pathname.match(/\/(document|presentation|spreadsheets)\/(?:u\/\d+\/)?d\/([\w-]+)/))) {
-      return { kind: m[1], id: m[2], authuser };
+      return { kind: m[1] as Kind, id: m[2]!, authuser };
     }
-    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1], authuser };
+    if ((m = u.pathname.match(/\/file\/(?:u\/\d+\/)?d\/([\w-]+)/))) return { kind: 'file', id: m[1]!, authuser };
     if (/\/forms\//.test(u.pathname)) return { kind: 'form', id: '', authuser };
   }
   return null;
+}
+
+export function exportExtFor(kind: Kind, docFormat: DocFormat = 'pdf'): string {
+  return EXPORT_EXT[kind]?.[docFormat === 'office' ? 'office' : 'pdf'] ?? '';
 }
 
 /**
  * The URL the browser should fetch to get the file: originals as-is, Google-native docs
  * exported as PDF (default) or as Office files (docFormat 'office').
  */
-export function downloadUrlFor({ kind, id, authuser }, docFormat = 'pdf') {
+export function downloadUrlFor(
+  { kind, id, authuser }: { kind: Kind; id: string; authuser?: string },
+  docFormat: DocFormat = 'pdf',
+): string | null {
   const q = new URLSearchParams();
-  let base;
-  const ext = EXPORT_EXT[kind]?.[docFormat === 'office' ? 'office' : 'pdf'];
+  const ext = exportExtFor(kind, docFormat);
+  let base: string;
   switch (kind) {
     case 'file':
       base = 'https://drive.usercontent.google.com/download';
@@ -110,25 +118,21 @@ export function downloadUrlFor({ kind, id, authuser }, docFormat = 'pdf') {
   return qs ? `${base}?${qs}` : base;
 }
 
-export function exportExtFor(kind, docFormat = 'pdf') {
-  return EXPORT_EXT[kind]?.[docFormat === 'office' ? 'office' : 'pdf'] || '';
-}
-
-export function filenameFromDisposition(cd) {
+export function filenameFromDisposition(cd: string | null | undefined): string | null {
   if (!cd) return null;
   let m = cd.match(/filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/i);
   if (m) {
     try {
-      return decodeURIComponent(m[1].trim());
+      return decodeURIComponent(m[1]!.trim());
     } catch {
       /* fall through */
     }
   }
   m = cd.match(/filename\s*=\s*"([^"]+)"/i) || cd.match(/filename\s*=\s*([^;]+)/i);
-  return m ? m[1].trim() : null;
+  return m ? m[1]!.trim() : null;
 }
 
-const MIME_EXT = {
+const MIME_EXT: Record<string, string> = {
   'application/pdf': '.pdf',
   'application/msword': '.doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
@@ -158,16 +162,25 @@ const MIME_EXT = {
   'video/webm': '.webm',
 };
 
-export function extFromMime(ct) {
-  const base = String(ct || '').split(';')[0].trim().toLowerCase();
+export function extFromMime(ct: string | null | undefined): string {
+  const base = String(ct || '').split(';')[0]!.trim().toLowerCase();
   return MIME_EXT[base] || '';
 }
 
+export interface FileNameInput {
+  cd?: string;
+  ct?: string;
+  hint?: string;
+  kind: FileKind;
+  id: string;
+  docFormat?: DocFormat;
+}
+
 /** Pick the best file name we can: server-provided first, then the link text, then the id. */
-export function buildFileName({ cd, ct, hint, kind, id, docFormat = 'pdf' }) {
+export function buildFileName({ cd, ct, hint, kind, id, docFormat = 'pdf' }: FileNameInput): string {
   let name = filenameFromDisposition(cd);
   if (!name) {
-    const h = String(hint || '').split('\n')[0].trim();
+    const h = String(hint || '').split('\n')[0]!.trim();
     name = h || `${kind}-${String(id).slice(0, 8)}`;
   }
   if (EXPORT_KINDS.has(kind)) {
@@ -181,11 +194,12 @@ export function buildFileName({ cd, ct, hint, kind, id, docFormat = 'pdf' }) {
 
 // ---------------------------------------------------------------- Drive folders
 
-const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-export function decodeEntities(s) {
-  return String(s ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+export function decodeEntities(s: unknown): string {
+  return String(s ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
     if (e[0] === '#') {
-      const code = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      const code = e[1]!.toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
       return Number.isFinite(code) ? String.fromCodePoint(code) : m;
     }
     return ENTITIES[e.toLowerCase()] ?? m;
@@ -196,8 +210,8 @@ export function decodeEntities(s) {
  * Parse the HTML of drive.google.com/embeddedfolderview?id=… into [{href, name}].
  * That page is a plain, server-rendered list, which is why it's usable without the Drive API.
  */
-export function parseFolderHtml(html) {
-  const out = [];
+export function parseFolderHtml(html: string): { href: string; name: string }[] {
+  const out: { href: string; name: string }[] = [];
   const blocks = String(html || '').split(/class="flip-entry"/).slice(1);
   for (const b of blocks) {
     const href = b.match(/<a[^>]+href="([^"]+)"/i)?.[1];

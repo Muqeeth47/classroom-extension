@@ -3,99 +3,137 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Classroom Bulk Downloader</title>
-  <meta name="description" content="Download every file attached to a Google Classroom class in one click, in its original format. Free browser extension.">
-  <link rel="icon" href="icon.png">
+  <title>Ilm</title>
+  <meta name="description" content="Download every file from a Google Classroom class in one click, in its original format.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #ffffff; --surface: #f5f7fa; --fg: #1d2127; --muted: #5f6b7a;
-      --line: #dfe4ea; --accent: #1a73e8; --accent-fg: #ffffff;
+    @font-face {
+      font-family: "JetBrains Mono";
+      src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+      font-weight: 400;
+      font-display: swap;
     }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #16181c; --surface: #1f2227; --fg: #e8eaed; --muted: #a0a8b3; --line: #343941; --accent: #8ab4f8; --accent-fg: #0d1b30; }
+    @font-face {
+      font-family: "JetBrains Mono";
+      src: url("fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+      font-weight: 700;
+      font-display: swap;
     }
+
+    /* Black and white only. Dark by default; flips to white when the system prefers light. */
+    :root { color-scheme: dark light; --bg: #000; --fg: #fff; --muted: #999; --line: #333; }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #fff; --fg: #000; --muted: #666; --line: #ccc; }
+    }
+
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-    .wrap { max-width: 680px; margin: 0 auto; padding: 0 20px; }
-    header { padding: 56px 0 32px; }
-    .brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 600; }
-    .brand img { width: 28px; height: 28px; border-radius: 7px; }
-    h1 { margin: 20px 0 12px; font-size: clamp(28px, 6vw, 40px); line-height: 1.15; letter-spacing: -0.5px; }
-    h2 { margin: 0 0 12px; font-size: 20px; }
-    h3 { margin: 20px 0 6px; font-size: 16px; }
-    .lead { margin: 0 0 24px; font-size: 18px; color: var(--muted); }
-    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
-    .btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--line); color: var(--fg); text-decoration: none; font-weight: 600; background: var(--surface); }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-    section { padding: 28px 0; border-top: 1px solid var(--line); }
-    ol, ul { margin: 0; padding-left: 22px; }
-    li { margin: 6px 0; }
-    p { margin: 0 0 10px; }
-    .muted { color: var(--muted); }
-    code { padding: 1px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); font-size: 0.92em; }
-    a { color: var(--accent); }
-    footer { padding: 28px 0 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      min-height: 100svh;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--fg);
+      font: 400 15px/1.7 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { flex: 1; display: grid; align-content: center; width: 100%; max-width: 680px; margin: 0 auto; padding: 48px 20px; }
+    .brand { align-self: flex-start; padding: 22px 24px; color: var(--fg); font-size: 22px; font-weight: 700; letter-spacing: -0.5px; text-decoration: none; }
+    h1 { margin: 0 0 12px; font-size: clamp(28px, 7vw, 44px); line-height: 1.15; font-weight: 700; letter-spacing: -1px; }
+    p { margin: 0 0 12px; }
+    .lead { margin: 0 0 32px; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 22px;
+      border: 1px solid var(--fg);
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn.primary { background: var(--fg); color: var(--bg); }
+    .btn:hover { text-decoration: underline; text-underline-offset: 4px; }
+    :focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+    a { color: var(--fg); text-underline-offset: 3px; }
+
+    footer { padding: 20px; text-align: center; color: var(--muted); font-size: 12.5px; }
+    footer a { color: var(--muted); }
+
+    /* Popups */
+    dialog {
+      width: min(440px, calc(100vw - 32px));
+      padding: 24px;
+      border: 1px solid var(--fg);
+      background: var(--bg);
+      color: var(--fg);
+      font: inherit;
+    }
+    dialog::backdrop { background: rgb(0 0 0 / 0.7); }
+    dialog h2 { margin: 0 0 16px; font-size: 16px; }
+    dialog ol { margin: 0 0 16px; padding-left: 22px; }
+    dialog li { margin: 6px 0; padding-left: 4px; }
+    dialog ::marker { color: var(--muted); }
+    dialog .small { margin: 0; color: var(--muted); font-size: 13px; }
+    dialog .links { display: grid; gap: 4px; margin: 0 0 20px; }
+    code { padding: 0 5px; border: 1px solid var(--line); font: inherit; font-size: 0.93em; overflow-wrap: anywhere; }
+    .close { position: absolute; top: 8px; right: 8px; min-width: 40px; min-height: 40px; border: 0; background: none; color: var(--fg); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+    dialog .btn { width: 100%; }
+
+    @media (max-width: 480px) { .btn { width: 100%; } }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="brand"><img src="icon.png" alt="" width="28" height="28"> Classroom Bulk Downloader</div>
-      <h1>Every file from a Google Classroom class, in one click.</h1>
-      <p class="lead">Saves PDFs, Word, PowerPoint, Excel, images and more to your computer, in their original format. No zip files.</p>
-      <div class="actions">
-        <a class="btn primary" href="https://github.com/Muqeeth47/classroom-extension/archive/refs/heads/main.zip">Download</a>
-        <a class="btn" href="https://github.com/Muqeeth47/classroom-extension">View on GitHub</a>
-      </div>
-    </header>
+  <a class="brand" href="./" aria-label="ilm home">ilm.</a>
 
-    <section id="install">
-      <h2>Install</h2>
-      <p class="muted">Works on Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.</p>
-      <ol>
-        <li>Click <b>Download</b> above and unzip the file.</li>
-        <li>Chrome, Edge, Brave or Opera: open <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>) and turn on <b>Developer mode</b>.</li>
-        <li>Click <b>Load unpacked</b> and choose the unzipped folder, the one that contains <code>manifest.json</code>.</li>
-        <li>Pin the extension from the puzzle-piece menu so it stays visible.</li>
-      </ol>
-      <h3>Firefox</h3>
-      <ol>
-        <li>Open <code>about:debugging#/runtime/this-firefox</code>.</li>
-        <li>Click <b>Load Temporary Add-on</b> and choose <code>manifest.json</code> from the unzipped folder.</li>
-        <li>Open the extension and press <b>Allow access</b> when asked. Firefox removes temporary add-ons when it restarts, so repeat this after a restart.</li>
-      </ol>
-    </section>
+  <main>
+    <h1>Every file from your class. One click.</h1>
+    <p class="lead">Original formats. No zip. Saved to your device.</p>
+    <div class="actions">
+      <button class="btn primary" type="button" data-open="get">Download</button>
+      <button class="btn" type="button" data-open="contact">Contact</button>
+    </div>
+  </main>
 
-    <section id="use">
-      <h2>How to use</h2>
-      <ol>
-        <li>Open Google Classroom, open a class, and go to its <b>Classwork</b> tab.</li>
-        <li>Click the extension and press <b>Find files in this class</b>. It reads every post and any Drive folders attached to them.</li>
-        <li>Untick anything you don't want. You can rename the folder and choose whether to sort files by topic.</li>
-        <li>Press <b>Download</b>. Files appear in your <code>Downloads/Classroom/</code> folder, on this device. Nothing is uploaded or saved to Google Drive.</li>
-      </ol>
-    </section>
+  <footer>Free and open source (MIT). Not affiliated with Google.</footer>
 
-    <section id="notes">
-      <h2>Good to know</h2>
-      <ul>
-        <li><b>Original formats.</b> Uploaded files are saved exactly as they are. Google Docs, Slides and Sheets have no original file, so you choose PDF or Word / PowerPoint / Excel.</li>
-        <li><b>Private.</b> It runs in your browser with your own Google login. It collects nothing and sends nothing anywhere except to Google to fetch your files.</li>
-        <li><b>Teacher restrictions are respected.</b> If a file's owner turned off downloading, it is listed as skipped.</li>
-        <li><b>School accounts.</b> If your school admin blocks extensions or Drive downloads, it won't work for you.</li>
-        <li><b>Safari</b> isn't supported yet.</li>
-      </ul>
-    </section>
+  <dialog id="get" aria-labelledby="get-title">
+    <button class="close" type="button" aria-label="Close" data-close>&times;</button>
+    <h2 id="get-title">Get the extension</h2>
+    <ol>
+      <li>Download and unzip it.</li>
+      <li>Open <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>).</li>
+      <li>Turn on <b>Developer mode</b>.</li>
+      <li>Click <b>Load unpacked</b> and pick the unzipped folder.</li>
+    </ol>
+    <a class="btn primary" href="https://github.com/Muqeeth47/classroom-extension/releases/latest/download/ilm.zip">Download .zip</a>
+    <p class="small" style="margin-top:14px">Firefox: <code>about:debugging</code> &rarr; This Firefox &rarr; Load Temporary Add-on &rarr; <code>manifest.json</code>.</p>
+  </dialog>
 
-    <section id="contact">
-      <h2>Contact</h2>
-      <p>Found a bug or have an idea? Get in touch.</p>
-      <p><a href="mailto:muqeethshaikabdul@gmail.com">muqeethshaikabdul@gmail.com</a><br><a href="tel:9014249493">9014249493</a></p>
-    </section>
+  <dialog id="contact" aria-labelledby="contact-title">
+    <button class="close" type="button" aria-label="Close" data-close>&times;</button>
+    <h2 id="contact-title">Contact</h2>
+    <div class="links">
+      <a href="mailto:muqeethshaikabdul@gmail.com">muqeethshaikabdul@gmail.com</a>
+      <a href="tel:9014249493">9014249493</a>
+    </div>
+    <a class="btn" href="https://github.com/Muqeeth47/classroom-extension">GitHub</a>
+  </dialog>
 
-    <footer>Not affiliated with or endorsed by Google. Google Classroom and Google Drive are trademarks of Google LLC. Open source, <a href="https://github.com/Muqeeth47/classroom-extension/blob/main/LICENSE">MIT licence</a>.</footer>
-  </div>
+  <script>
+    // Opens/closes the popups. Esc and the backdrop click also close them.
+    document.querySelectorAll('[data-open]').forEach((b) =>
+      b.addEventListener('click', () => document.getElementById(b.dataset.open).showModal()));
+    document.querySelectorAll('dialog').forEach((d) => {
+      d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) d.close(); });
+    });
+  </script>
 </body>
 </html>

@@ -46,7 +46,7 @@ header {
   border-bottom: 1px solid var(--line);
 }
 header img { border-radius: 6px; }
-h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.1px; }
+h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
 
 main { display: grid; gap: 12px; padding: 16px; }
 p { margin: 0; }

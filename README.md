@@ -1,55 +1,39 @@
-# Classroom Bulk Downloader
+# Ilm
 
-Download every file attached to a Google Classroom class in one click, in its original format. No zip files.
+Download every file from a Google Classroom class in one click. Original formats, no zip, saved to your device.
 
-- Saves to your computer's `Downloads/Classroom/<class>/<topic>/` folder, not to Google Drive.
-- Works on Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.
-- Uploaded PDFs, Word, PowerPoint, Excel, images and other files are saved exactly as they are. Google Docs, Slides and Sheets are exported as PDF or Word / PowerPoint / Excel (your choice).
-- Opens Drive folders attached to posts and downloads what's inside.
-- No account, no API key, no tracking. It runs in your browser with your own Google login.
-
-Website and manual: https://muqeeth47.github.io/classroom-extension/
+Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.
 
 ## Install
 
-1. Download this repository as a ZIP and unzip it.
-2. **Chrome / Edge / Brave / Opera:** open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and choose the folder that contains `manifest.json`.
-3. **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on** and choose `manifest.json`. Press **Allow access** in the popup. Firefox removes temporary add-ons on restart.
+1. Download `ilm.zip` from the [latest release](https://github.com/Muqeeth47/classroom-extension/releases/latest) and unzip it.
+2. **Chrome / Edge / Brave / Opera:** open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked**, pick the unzipped folder.
+3. **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, pick `manifest.json`, then press **Allow access** in the popup.
 
 ## Use
 
-1. Open a class in Google Classroom and go to its **Classwork** tab.
-2. Click the extension, then **Find files in this class**.
-3. Untick anything you don't want, then **Download**.
+Open a class in Google Classroom, go to **Classwork**, click Ilm, press **Find files in this class**, then **Download**. Files land in `Downloads/Classroom/<class>/`.
 
-## Limits
-
-- If a file's owner disabled downloading, or you have no access, it is reported as failed. It is not bypassed.
-- Classroom's page layout is not a public interface. If Google changes it, scanning may break; the popup's activity log helps diagnose it.
-- School admins can block extensions or Drive downloads.
-- Safari is not supported yet (it needs a Mac and Xcode to convert).
-- Topic folders are best-effort. Turn off "Sort into topic folders" if they come out wrong.
+- Uploaded files are saved exactly as they are. Google Docs, Slides and Sheets are exported as PDF or Word / PowerPoint / Excel (your choice).
+- Drive folders attached to posts are opened too.
+- Files with downloading disabled by their owner are skipped, not bypassed.
+- It runs in your browser with your own login and collects nothing.
 
 ## Develop
 
+TypeScript + esbuild + Vitest. Node 22.12 or newer.
+
 ```
-npm test        # unit + end-to-end tests (no dependencies)
+npm install
+npm run check     # typecheck, tests, build, manifest lint
+npm run build     # src/ -> dist/ (load dist/ as the unpacked extension)
+npm run package   # web-ext-artifacts/ilm.zip
 ```
 
-- `manifest.json`: one Manifest V3 file for all browsers
-- `content.js`: runs on Classroom, scrolls and lists the posts
-- `background.js`: reads each post, expands Drive folders, runs downloads
-- `lib.js`: link detection, URLs and file naming
-- `popup.*`: the UI
-- `docs/`: the website (GitHub Pages)
-- `tests/ui-harness.html`: view the popup against a fake browser API at any width
-
-After editing, reload the extension on `chrome://extensions`.
+Push a tag like `v0.2.0` and GitHub Actions builds the zip and attaches it to a release. The website is plain HTML/CSS in `docs/`.
 
 ## Contact
 
 muqeethshaikabdul@gmail.com, 9014249493
 
-## Licence
-
-MIT. Not affiliated with or endorsed by Google.
+MIT licence. Not affiliated with or endorsed by Google. Website set in [JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL OFL 1.1).
