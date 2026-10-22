@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Dev-only: renders popup.js against a fake browser API so the layout can be checked in any
+     browser at any width. Serve the project root over http, then open
+     /tests/ui-harness.html?phase=review  (idle | scanning | collecting | review | downloading | done | error | empty) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classroom Downloader</title>
+  <link rel="stylesheet" href="../popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon48.png" alt="" width="24" height="24">
+    <h1>Classroom Downloader</h1>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <script>
+    const phase = new URLSearchParams(location.search).get('phase') || 'idle';
+    const files = [
+      { key: 'a', kind: 'file', label: 'Week 1 worksheet.pdf', post: 'Forces lab', topic: 'Unit 1: Forces', sub: [] },
+      { key: 'b', kind: 'document', label: 'Class notes', post: 'Forces lab', topic: 'Unit 1: Forces', sub: [] },
+      { key: 'c', kind: 'file', label: 'A really long attachment file name that keeps going and going to test wrapping.docx', post: 'Reading', topic: 'Unit 2', sub: ['Reading pack', 'Extras'] },
+      { key: 'd', kind: 'presentation', label: 'Energy slides', post: 'Reading', topic: 'Unit 2', sub: [] },
+      { key: 'e', kind: 'file', label: 'Diagram.png', post: 'Intro', topic: '', sub: [] },
+    ];
+    const base = { phase, className: 'Physics 12A', progress: { done: 7, total: 20, label: 'Energy and work' }, files: [], skipped: [], dl: { total: 5, done: 3, failed: 1, failures: [{ name: 'Diagram.png', reason: 'Download disabled by the owner, or no access with this account' }], lastId: 1, folder: 'Classroom/Physics 12A' }, log: ['10:00:01  Scanning 20 posts', '10:00:09  Done: 5 file(s), 1 skipped'], error: 'No posts found. Open the class’s Classwork tab (not Stream), let it finish loading, and try again.' };
+    if (phase === 'review') { base.files = files; base.skipped = [{ title: 'Exit ticket', reason: 'Google Form' }]; }
+    if (phase === 'empty') { base.phase = 'review'; }
+    const onTab = new URLSearchParams(location.search).get('tab') !== 'none';
+    window.chrome = {
+      runtime: { sendMessage: async (m) => (m.type === 'GET_STATE' ? base : { ok: true }) },
+      storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {} } },
+      permissions: { contains: async () => new URLSearchParams(location.search).get('access') !== 'no', request: async () => true },
+      tabs: { query: async () => [onTab ? { id: 1, url: 'https://classroom.google.com/c/abc' } : { id: 2, url: 'https://example.com' }] },
+    };
+  </script>
+  <script src="../popup.js" type="module"></script>
+</body>
+</html>

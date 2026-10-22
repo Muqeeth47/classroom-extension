@@ -1,0 +1,9 @@
+# Private working notes: never pushed
+CONTEXT.local.md
+
+node_modules/
+dist/
+web-ext-artifacts/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classroom Bulk Downloader</title>
+  <meta name="description" content="Download every file attached to a Google Classroom class in one click, in its original format. Free browser extension.">
+  <link rel="icon" href="icon.png">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff; --surface: #f5f7fa; --fg: #1d2127; --muted: #5f6b7a;
+      --line: #dfe4ea; --accent: #1a73e8; --accent-fg: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #16181c; --surface: #1f2227; --fg: #e8eaed; --muted: #a0a8b3; --line: #343941; --accent: #8ab4f8; --accent-fg: #0d1b30; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 20px; }
+    header { padding: 56px 0 32px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 600; }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    h1 { margin: 20px 0 12px; font-size: clamp(28px, 6vw, 40px); line-height: 1.15; letter-spacing: -0.5px; }
+    h2 { margin: 0 0 12px; font-size: 20px; }
+    h3 { margin: 20px 0 6px; font-size: 16px; }
+    .lead { margin: 0 0 24px; font-size: 18px; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--line); color: var(--fg); text-decoration: none; font-weight: 600; background: var(--surface); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+    section { padding: 28px 0; border-top: 1px solid var(--line); }
+    ol, ul { margin: 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    p { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    code { padding: 1px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); font-size: 0.92em; }
+    a { color: var(--accent); }
+    footer { padding: 28px 0 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><img src="icon.png" alt="" width="28" height="28"> Classroom Bulk Downloader</div>
+      <h1>Every file from a Google Classroom class, in one click.</h1>
+      <p class="lead">Saves PDFs, Word, PowerPoint, Excel, images and more to your computer, in their original format. No zip files.</p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/Muqeeth47/classroom-extension/archive/refs/heads/main.zip">Download</a>
+        <a class="btn" href="https://github.com/Muqeeth47/classroom-extension">View on GitHub</a>
+      </div>
+    </header>
+
+    <section id="install">
+      <h2>Install</h2>
+      <p class="muted">Works on Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.</p>
+      <ol>
+        <li>Click <b>Download</b> above and unzip the file.</li>
+        <li>Chrome, Edge, Brave or Opera: open <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>) and turn on <b>Developer mode</b>.</li>
+        <li>Click <b>Load unpacked</b> and choose the unzipped folder, the one that contains <code>manifest.json</code>.</li>
+        <li>Pin the extension from the puzzle-piece menu so it stays visible.</li>
+      </ol>
+      <h3>Firefox</h3>
+      <ol>
+        <li>Open <code>about:debugging#/runtime/this-firefox</code>.</li>
+        <li>Click <b>Load Temporary Add-on</b> and choose <code>manifest.json</code> from the unzipped folder.</li>
+        <li>Open the extension and press <b>Allow access</b> when asked. Firefox removes temporary add-ons when it restarts, so repeat this after a restart.</li>
+      </ol>
+    </section>
+
+    <section id="use">
+      <h2>How to use</h2>
+      <ol>
+        <li>Open Google Classroom, open a class, and go to its <b>Classwork</b> tab.</li>
+        <li>Click the extension and press <b>Find files in this class</b>. It reads every post and any Drive folders attached to them.</li>
+        <li>Untick anything you don't want. You can rename the folder and choose whether to sort files by topic.</li>
+        <li>Press <b>Download</b>. Files appear in your <code>Downloads/Classroom/</code> folder, on this device. Nothing is uploaded or saved to Google Drive.</li>
+      </ol>
+    </section>
+
+    <section id="notes">
+      <h2>Good to know</h2>
+      <ul>
+        <li><b>Original formats.</b> Uploaded files are saved exactly as they are. Google Docs, Slides and Sheets have no original file, so you choose PDF or Word / PowerPoint / Excel.</li>
+        <li><b>Private.</b> It runs in your browser with your own Google login. It collects nothing and sends nothing anywhere except to Google to fetch your files.</li>
+        <li><b>Teacher restrictions are respected.</b> If a file's owner turned off downloading, it is listed as skipped.</li>
+        <li><b>School accounts.</b> If your school admin blocks extensions or Drive downloads, it won't work for you.</li>
+        <li><b>Safari</b> isn't supported yet.</li>
+      </ul>
+    </section>
+
+    <section id="contact">
+      <h2>Contact</h2>
+      <p>Found a bug or have an idea? Get in touch.</p>
+      <p><a href="mailto:muqeethshaikabdul@gmail.com">muqeethshaikabdul@gmail.com</a><br><a href="tel:9014249493">9014249493</a></p>
+    </section>
+
+    <footer>Not affiliated with or endorsed by Google. Google Classroom and Google Drive are trademarks of Google LLC. Open source, <a href="https://github.com/Muqeeth47/classroom-extension/blob/main/LICENSE">MIT licence</a>.</footer>
+  </div>
+</body>
+</html>

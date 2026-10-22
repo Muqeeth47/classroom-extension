@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Classroom Bulk Downloader",
+  "version": "0.2.0",
+  "description": "Download every file attached to a Google Classroom class in one click, in its original format.",
+  "minimum_chrome_version": "121",
+  "permissions": ["downloads", "scripting", "storage"],
+  "host_permissions": [
+    "https://classroom.google.com/*",
+    "https://*.google.com/*",
+    "https://*.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://classroom.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Download Classroom files"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "classroom-bulk-downloader@local",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": { "required": ["none"] }
+    },
+    "gecko_android": {
+      "strict_min_version": "121.0"
+    }
+  }
+}
