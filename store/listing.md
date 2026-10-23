@@ -18,7 +18,7 @@ HOW IT WORKS
 1. Open the announcement or post whose files you want in Google Classroom.
 2. Click Ilm and press "Get files from this post".
 3. Untick anything you don't want, then press Download.
-Your files are saved to your Downloads folder under Classroom/. To save a whole class at once, open its Classwork tab instead.
+Your files are saved to your Downloads folder under Classroom/. To save everything posted in a class (announcements, assignments and materials) at once, open the class instead. Ilm reads only that one class.
 
 WHAT YOU GET
 - Original files: PDFs, Word, PowerPoint, Excel, images and more are saved exactly as they were uploaded.
@@ -36,7 +36,7 @@ Works on desktop Chrome, Edge, Brave, Opera and Firefox (Windows, macOS, Linux).
 Not affiliated with or endorsed by Google. Google Classroom and Google Drive are trademarks of Google LLC.
 
 Source: https://github.com/Muqeeth47/classroom-extension
-Privacy: https://ilm-xi.vercel.app/privacy.html
+Privacy: https://getilm.vercel.app/privacy.html
 Contact: muqeethshaikabdul@gmail.com
 
 ## Single purpose (Chrome Web Store)
@@ -53,7 +53,7 @@ Download the files attached to a Google Classroom post or class to the user's de
 ## Data usage disclosure (Chrome Web Store privacy tab)
 - Collects no user data. Reads page content on classroom.google.com locally only to find attachments.
 - Does not sell data, use it for unrelated purposes, or use it for creditworthiness or lending.
-- Privacy policy URL: https://ilm-xi.vercel.app/privacy.html
+- Privacy policy URL: https://getilm.vercel.app/privacy.html
 
 ## Firefox Add-ons notes
 - Data collection permissions: none required (declared in the manifest).

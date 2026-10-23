@@ -1,0 +1,10 @@
+{
+  "redirects": [
+    {
+      "source": "/:path(.*)",
+      "has": [{ "type": "host", "value": "ilm-xi.vercel.app" }],
+      "destination": "https://getilm.vercel.app/:path",
+      "permanent": true
+    }
+  ]
+}

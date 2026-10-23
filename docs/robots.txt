@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ilm-xi.vercel.app/sitemap.xml
+Sitemap: https://getilm.vercel.app/sitemap.xml

@@ -121,7 +121,7 @@ function viewIdle(): HTMLElement[] {
     return [
       h('div', { class: 'card stack' },
         h('p', { text: 'Open the announcement or post whose files you want to download.' }),
-        h('p', { class: 'muted small', text: 'Then click this button again. To get a whole class, open its Classwork tab instead.' }),
+        h('p', { class: 'muted small', text: 'Then click this button again. Or open a class (its Stream or Classwork tab) to get everything posted in it.' }),
       ),
       h('button', { class: 'primary block', text: 'Find files', disabled: true }),
     ];
@@ -130,7 +130,7 @@ function viewIdle(): HTMLElement[] {
   const mode: PageKind = kind;
   const isPost = mode === 'post';
   return [
-    h('p', { class: 'muted', text: isPost ? 'Gets the files attached to this post, in their original format.' : 'Gets every file in this class, in their original format. Nothing is zipped.' }),
+    h('p', { class: 'muted', text: isPost ? 'Gets the files attached to this post, in their original format.' : 'Gets everything posted in this class (announcements, assignments and materials), in their original format. Nothing is zipped.' }),
     h('button', {
       class: 'primary block',
       text: isPost ? 'Get files from this post' : 'Get files from this class',

@@ -32,6 +32,8 @@ let scanThrows = false;
 let injectThrows = false;
 let scanOverride: ScanResult | null = null;
 let stallDownloads = false; // a download that never finishes (e.g. the browser is asking about a risky file)
+let currentTabLinks: PageLink[] = []; // attachments shown directly on the page the user has open (tab 1)
+const siblingScans: Record<string, ScanResult | Error> = {}; // what the class's OTHER tab reports, by url
 
 const classScan = (): ScanResult => ({
   mode: 'class',
@@ -66,7 +68,12 @@ const fakeChrome = {
     remove: async () => {},
     get: async (id: unknown) => ({ id, status: 'complete' }),
     onUpdated: { addListener() {}, removeListener() {} },
-    sendMessage: async (_tabId: number, msg: { mode: string }) => {
+    sendMessage: async (tabId: number | string, msg: { mode: string }) => {
+      if (typeof tabId === 'string') {
+        const r = siblingScans[tabId];
+        if (r instanceof Error) throw r;
+        if (r) return r;
+      }
       if (scanThrows) throw new Error('Receiving end does not exist');
       return scanOverride ?? (msg.mode === 'post' ? postScan() : classScan());
     },
@@ -80,7 +87,8 @@ const fakeChrome = {
       }
       if (scrapeGate) await scrapeGate;
       const id = opts.target.tabId;
-      return [{ result: id === OPEN_POST_TAB ? openPostLinks : (POSTS[String(id)] ?? []) }];
+      const links = id === OPEN_POST_TAB ? openPostLinks : id === 1 ? currentTabLinks : (POSTS[String(id)] ?? []);
+      return [{ result: links }];
     },
   },
   downloads: {
@@ -129,6 +137,8 @@ globalThis.fetch = (async (url: unknown) => {
   if (u.includes('id=BUSY')) return { status: 429, headers: headers({}) };
   if (u.includes('id=OLDKEY')) return pdf('Old.pdf');
   if (u.includes('id=ACCT')) return pdf('Account.pdf');
+  if (u.includes('id=ANNFILE')) return pdf('Syllabus.pdf');
+  if (u.includes('id=ANN2')) return pdf('Announcement slides.pdf');
   return { status: 404, headers: headers({}) };
 }) as unknown as typeof fetch;
 
@@ -172,6 +182,8 @@ beforeEach(async () => {
   injectThrows = false;
   scanOverride = null;
   stallDownloads = false;
+  currentTabLinks = [];
+  for (const k of Object.keys(siblingScans)) delete siblingScans[k];
   openPostLinks = [];
 });
 
@@ -291,10 +303,17 @@ describe('single post', () => {
 
 // ---- errors the user should see plainly ---------------------------------------------------
 describe('errors', () => {
-  test('a page with no posts tells the user what to open', async () => {
-    const s = await scanPost([], { mode: 'class', className: '', items: [] });
+  test('a single post that reports no page tells the user what to open', async () => {
+    const s = await scanPost([], { mode: 'post', className: '', items: [] });
     expect(s.phase).toBe('error');
     expect(s.error).toMatch(/announcement|post/i);
+  });
+
+  test('a class with nothing in it explains itself', async () => {
+    scanOverride = { mode: 'class', className: 'Empty class', page: 'stream', items: [], siblings: [] };
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const s = await until((x) => x.phase === 'error', 'error');
+    expect(s.error).toMatch(/No announcements or posts found in this class/);
   });
 
   test('a scanner error is passed through', async () => {
@@ -338,7 +357,7 @@ describe('start over / cancel', () => {
     let release!: () => void;
     scrapeGate = new Promise<void>((r) => (release = r));
     await send({ type: 'START', tabId: 1, mode: 'class' });
-    await until((x) => x.phase === 'collecting', 'collecting');
+    await until((x) => x.phase === 'scanning' || x.phase === 'collecting', 'scanning');
 
     await send({ type: 'RESET' });
     release(); // the old scrape now finishes
@@ -353,7 +372,7 @@ describe('start over / cancel', () => {
     let release!: () => void;
     scrapeGate = new Promise<void>((r) => (release = r));
     await send({ type: 'START', tabId: 1, mode: 'class' });
-    await until((x) => x.phase === 'collecting', 'collecting');
+    await until((x) => x.phase === 'scanning' || x.phase === 'collecting', 'scanning');
     await send({ type: 'RESET' });
 
     scrapeGate = null;
@@ -372,7 +391,7 @@ describe('start over / cancel', () => {
     let release!: () => void;
     scrapeGate = new Promise<void>((r) => (release = r));
     await send({ type: 'START', tabId: 1, mode: 'class' });
-    await until((x) => x.phase === 'collecting', 'collecting');
+    await until((x) => x.phase === 'scanning' || x.phase === 'collecting', 'scanning');
     await send({ type: 'CANCEL' });
     release();
     await until((x) => x.phase === 'idle', 'idle after cancel');
@@ -396,5 +415,114 @@ describe('start over / cancel', () => {
     await send({ type: 'CANCEL' });
     const done = await until((x) => x.phase === 'done', 'done after Stop');
     expect(done.phase).toBe('done');
+  });
+});
+
+// ---- everything posted in a class (Stream + Classwork) -----------------------------------
+describe('whole class: announcements, assignments and materials', () => {
+  const STREAM_URL = 'https://classroom.google.com/c/C1';
+  const CLASSWORK_URL = 'https://classroom.google.com/w/C1/t/all';
+  const ANN_URL = 'https://classroom.google.com/c/C1/p/ANN1/details';
+  const P1_URL = 'https://classroom.google.com/c/C1/a/P1/details';
+
+  const onClasswork = (): ScanResult => ({ ...classScan(), page: 'classwork', siblings: [STREAM_URL] });
+  const streamPage = (): ScanResult => ({
+    mode: 'class',
+    className: '',
+    page: 'stream',
+    items: [
+      { url: ANN_URL, title: 'Welcome', topic: '' },
+      { url: P1_URL, title: 'Forces lab', topic: '' }, // the Stream also shows Classwork posts, without their topic
+    ],
+  });
+
+  async function scanClassWith(here: ScanResult): Promise<AppState> {
+    scanOverride = here;
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    return until((x) => x.phase === 'review' || x.phase === 'error', 'review or error');
+  }
+
+  test('reads BOTH tabs from either one, and keeps announcements in their own folder', async () => {
+    POSTS[ANN_URL] = [{ href: 'https://drive.google.com/file/d/ANN2/view', text: 'Announcement slides.pdf' }];
+    POSTS[STREAM_URL] = [
+      { href: 'https://drive.google.com/file/d/ANNFILE/view', text: 'Syllabus.pdf' }, // attached straight on the Stream
+      { href: 'https://drive.google.com/file/d/FILE1/view', text: 'Worksheet.pdf' }, // ALSO attached to a Classwork post
+      { href: 'https://drive.google.com/drive/folders/CLASSFOLDER', text: 'Class Drive folder' },
+    ];
+    siblingScans[STREAM_URL] = streamPage();
+    const tabsBefore = calls.tabsCreate;
+    try {
+      const s = await scanClassWith(onClasswork());
+      expect(s.files.map((f) => f.key).sort()).toEqual(['document:DOC1', 'file:ANN2', 'file:ANNFILE', 'file:F2', 'file:F3', 'file:FILE1']);
+
+      const topic = (id: string) => s.files.find((f) => f.id === id)?.topic;
+      expect(topic('FILE1')).toBe('Unit 1: Forces'); // Classwork's topic wins over the Stream's copy
+      expect(topic('ANNFILE')).toBe('Announcements'); // shown directly on the Stream
+      expect(topic('ANN2')).toBe(''); // an announcement page with no topic
+
+      // The Stream tab + P1, P2 and the announcement: each post opened exactly once.
+      expect(calls.tabsCreate - tabsBefore).toBe(4);
+      // The class's own Drive folder (submissions) is never opened.
+      expect(fetched.some((u) => u.includes('CLASSFOLDER'))).toBe(false);
+
+      const done = await downloadAll(s);
+      expect(downloads.map((d) => d.filename)).toContain('Classroom/Class/Announcements/Syllabus.pdf');
+      expect(done.dl.done).toBeGreaterThanOrEqual(4);
+    } finally {
+      delete POSTS[ANN_URL];
+      delete POSTS[STREAM_URL];
+    }
+  });
+
+  test('starting from the Stream also reads Classwork', async () => {
+    currentTabLinks = [{ href: 'https://drive.google.com/file/d/ANNFILE/view', text: 'Syllabus.pdf' }];
+    siblingScans[CLASSWORK_URL] = { ...classScan(), page: 'classwork' };
+    const s = await scanClassWith({ mode: 'class', className: 'Physics 12A', page: 'stream', items: [], siblings: [CLASSWORK_URL] });
+    expect(s.files.map((f) => f.key)).toEqual(expect.arrayContaining(['file:ANNFILE', 'file:FILE1', 'document:DOC1']));
+    expect(s.files.find((f) => f.id === 'ANNFILE')?.topic).toBe('Announcements');
+    expect(s.files.find((f) => f.id === 'FILE1')?.topic).toBe('Unit 1: Forces');
+  });
+
+  test('a class that only has plain announcements still works', async () => {
+    currentTabLinks = [{ href: 'https://drive.google.com/file/d/ANNFILE/view', text: 'Syllabus.pdf' }];
+    siblingScans[CLASSWORK_URL] = { mode: 'class', className: '', page: 'classwork', items: [] };
+    const s = await scanClassWith({ mode: 'class', className: 'Art', page: 'stream', items: [], siblings: [CLASSWORK_URL] });
+    expect(s.phase).toBe('review');
+    expect(s.files.map((f) => f.key)).toEqual(['file:ANNFILE']);
+  });
+
+  test('if the other tab cannot be read, what the first tab found is kept and the problem is logged', async () => {
+    siblingScans[STREAM_URL] = new Error('Receiving end does not exist');
+    const s = await scanClassWith(onClasswork());
+    expect(s.phase).toBe('review');
+    expect(s.files.map((f) => f.key)).toEqual(expect.arrayContaining(['file:FILE1', 'document:DOC1']));
+    expect(s.log.join('\n')).toMatch(/Could not read https:\/\/classroom\.google\.com\/c\/C1/);
+  });
+
+  test('a single post never touches the class\'s other tabs', async () => {
+    const before = calls.tabsCreate;
+    const s = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }], { ...postScan(), siblings: [STREAM_URL] });
+    expect(s.files.map((f) => f.key)).toEqual(['file:FILE9']);
+    expect(calls.tabsCreate).toBe(before);
+  });
+
+  test('a page address that is not Classroom is never opened', async () => {
+    const before = calls.tabsCreate;
+    const s = await scanClassWith({ ...onClasswork(), siblings: ['https://evil.example/c/C1', 'http://classroom.google.com/c/C1'] });
+    expect(s.phase).toBe('review');
+    expect(s.log.join('\n')).toMatch(/Ignored a page that is not on Classroom/);
+    // only the two Classwork posts were opened; neither bogus address was
+    expect(calls.tabsCreate - before).toBe(2);
+  });
+
+  test('the same Google Form seen in several places is listed once', async () => {
+    POSTS[STREAM_URL] = [{ href: 'https://docs.google.com/forms/d/e/FORM1/viewform', text: 'Exit ticket' }];
+    siblingScans[STREAM_URL] = streamPage();
+    try {
+      const s = await scanClassWith(onClasswork());
+      expect(s.skipped.filter((k) => k.reason === 'Google Form')).toHaveLength(1); // on P1, on the Stream, once
+    } finally {
+      delete POSTS[STREAM_URL];
+    }
   });
 });

@@ -87,21 +87,26 @@ describe('class scan only ever returns the open class', () => {
     }
   });
 
-  test('when the URL id matches no link, accepts the class that clearly dominates the page', async () => {
+  test('when the URL id matches no link but only ONE class is on the page, that class is used', async () => {
+    const mine = ['1', '2', '3'].map((id) => link({ course: 'COURSE1', id, title: 't' + id })).join('');
+    setPage('/w/SOMETHING_ELSE/t/all', `<main>${mine}</main>`);
+    const r = await scan('class');
+    expect(r.items).toHaveLength(3);
+  });
+
+  test('...but with several classes linked and no match it refuses, even if one looks dominant (never another class)', async () => {
     const mine = ['1', '2', '3', '4', '5', '6'].map((id) => link({ course: 'COURSE1', id, title: 't' + id })).join('');
     setPage('/w/SOMETHING_ELSE/t/all', `<main>${mine}${link({ course: 'COURSE2', id: 'Z', title: 'stray' })}</main>`);
     const r = await scan('class');
-    expect(r.items).toHaveLength(6);
-  });
-
-  test('...but refuses a toss-up instead of guessing', async () => {
-    setPage(
-      '/w/SOMETHING_ELSE/t/all',
-      `<main>${link({ course: 'COURSE1', id: '1', title: 'a' })}${link({ course: 'COURSE2', id: '2', title: 'b' })}</main>`,
-    );
-    const r = await scan('class');
     expect(r.items).toHaveLength(0);
     expect(r.error).toMatch(/several classes/i);
+  });
+
+  test('a class page whose own posts are absent never borrows posts from another class', async () => {
+    // e.g. a Stream of plain announcements with a sidebar linking to a different class
+    setPage('/c/COURSE1', `<aside>${link({ course: 'COURSE2', id: 'X', title: 'Other class work' })}</aside><main>Hello class</main>`);
+    const r = await scan('class');
+    expect(r.items.filter((i) => i.url.includes('COURSE2'))).toHaveLength(0);
   });
 
   test('a page with no posts returns nothing and no error (the worker explains)', async () => {

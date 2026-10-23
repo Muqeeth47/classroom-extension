@@ -4,6 +4,8 @@
 // All progress lives in `state`, mirrored to storage.session, so the popup can close and reopen.
 
 import {
+  ANNOUNCEMENTS_TOPIC,
+  isClassroomUrl,
   buildDownloadPath,
   buildFileName,
   classify,
@@ -152,21 +154,39 @@ async function start(tabId: number, mode: PageKind): Promise<void> {
   const my = ++run;
   state = freshState();
   state.phase = 'scanning';
-  state.progress = { done: 0, total: 0, label: mode === 'post' ? 'Reading this post…' : 'Loading every post in this class…' };
+  state.progress = { done: 0, total: 0, label: mode === 'post' ? 'Reading this post…' : 'Reading this class…' };
   startKeepAlive();
+  let windowId: number | undefined;
   try {
     await save();
     const scan = await requestScan(tabId, mode);
     if (isStopped(my)) return finishStopped(my);
     if (scan.error) throw new Error(scan.error);
-    if (!scan.items.length) {
-      throw new Error('No posts found. Open the post or announcement whose files you want, or a class’s Classwork tab, and try again.');
+    if (mode === 'post' && !scan.items.length) {
+      throw new Error('Could not find this post. Open the post or announcement whose files you want, then try again.');
     }
     state.className = scan.className || '';
-    // For a single post the user is already on the page, so read it in place instead of reopening it.
-    await collect(my, scan.items, scan.authuser ?? '', mode === 'post' ? tabId : undefined);
+    const authuser = scan.authuser ?? '';
+
+    if (mode === 'post') {
+      // A single post: the user is already on the page, so read it in place instead of reopening it.
+      await collect(my, { items: scan.items, inline: [], authuser, directTabId: tabId });
+      return;
+    }
+
+    // A class: read its Stream AND its Classwork (whichever one the user is on, plus the other), each
+    // post in a minimised window so nothing flashes over the user's work.
+    windowId = await openScanWindow();
+    const plan = await gatherClass(my, tabId, scan, windowId);
+    if (isStopped(my)) return finishStopped(my);
+    if (!plan.items.length && !plan.inline.length) {
+      throw new Error('No announcements or posts found in this class. Let the page finish loading, then try again.');
+    }
+    await collect(my, { ...plan, authuser, windowId });
   } catch (e) {
     await fail(e, my);
+  } finally {
+    if (windowId != null) chrome.windows.remove(windowId).catch(() => {});
   }
 }
 
@@ -178,10 +198,103 @@ async function finishStopped(my: number): Promise<void> {
   await save();
 }
 
+async function openScanWindow(): Promise<number | undefined> {
+  try {
+    const win = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
+    return win?.id;
+  } catch (e) {
+    log(`Could not create scan window (${errorMessage(e)}); using background tabs`);
+    return undefined;
+  }
+}
+
+/** Attachments shown directly on a page (for example inside announcements on the Stream). */
+interface InlineLink {
+  link: PageLink;
+  topic: string;
+}
+
+interface ScanPlan {
+  items: ScanItem[];
+  inline: InlineLink[];
+}
+
+const PAGE_NAME: Record<string, string> = { stream: 'the Stream', classwork: 'Classwork', other: 'this page' };
+
+/**
+ * Everything posted in one class: the posts that have their own page (assignments, materials, questions,
+ * announcements) from BOTH the Stream and Classwork, plus attachments shown inline on the pages.
+ */
+async function gatherClass(my: number, tabId: number, scan: ScanResult, windowId: number | undefined): Promise<ScanPlan> {
+  const byUrl = new Map<string, ScanItem>();
+  const inline: InlineLink[] = [];
+  const addItems = (items: ScanItem[]): void => {
+    for (const it of items) {
+      const prev = byUrl.get(it.url);
+      if (!prev) byUrl.set(it.url, { ...it });
+      else if (!prev.topic && it.topic) prev.topic = it.topic; // Classwork knows the topic; the Stream does not
+    }
+  };
+  const addInline = (page: ScanResult['page'], links: PageLink[]): void => {
+    const topic = page === 'stream' ? ANNOUNCEMENTS_TOPIC : '';
+    for (const link of links) inline.push({ link, topic });
+  };
+
+  const here = scan.page ?? 'other';
+  addItems(scan.items);
+  const hereInline = await scrapeTab(tabId);
+  addInline(here, hereInline);
+  log(`${PAGE_NAME[here]}: ${scan.items.length} post(s), ${hereInline.length} attachment link(s) shown on the page`);
+
+  // The class's other tab. One tab failing must never lose what the other already gave us.
+  for (const url of scan.siblings ?? []) {
+    if (isStopped(my)) break;
+    if (!isClassroomUrl(url)) {
+      log(`Ignored a page that is not on Classroom: ${url}`);
+      continue;
+    }
+    state.progress = { done: 0, total: 0, label: 'Reading the rest of this class…' };
+    await save();
+    try {
+      const sub = await scanSiblingPage(url, windowId);
+      if (sub.scan.error) throw new Error(sub.scan.error);
+      const there = sub.scan.page ?? 'other';
+      addItems(sub.scan.items);
+      addInline(there, sub.inline);
+      log(`${PAGE_NAME[there]}: ${sub.scan.items.length} post(s), ${sub.inline.length} attachment link(s) shown on the page`);
+    } catch (e) {
+      log(`Could not read ${url}: ${errorMessage(e)}`);
+    }
+  }
+  return { items: [...byUrl.values()], inline };
+}
+
+async function scanSiblingPage(url: string, windowId: number | undefined): Promise<{ scan: ScanResult; inline: PageLink[] }> {
+  const tab = await chrome.tabs.create({ url, active: false, ...(windowId != null ? { windowId } : {}) });
+  const id = tab.id;
+  if (id == null) throw new Error('Could not open the page');
+  try {
+    await waitForComplete(id, 25000);
+    const scan = await requestScan(id, 'class');
+    return { scan, inline: await scrapeTab(id) };
+  } finally {
+    chrome.tabs.remove(id).catch(() => {});
+  }
+}
+
+async function scrapeTab(tabId: number): Promise<PageLink[]> {
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: scrapeAttachmentsInPage });
+    return res?.result ?? [];
+  } catch {
+    return [];
+  }
+}
+
 interface CollectContext {
   seen: Set<string>;
   folders: FolderJob[];
-  /** Account number Classroom is open under; used when a link doesn't name one. */
+  /** Account number Classroom is open under; used when a link does not name one. */
   authuser: string;
 }
 
@@ -202,22 +315,17 @@ interface LinkMeta {
   sub?: string[];
 }
 
-async function collect(my: number, items: ScanItem[], authuser: string, directTabId?: number): Promise<void> {
+interface CollectInput extends ScanPlan {
+  authuser: string;
+  windowId?: number;
+  directTabId?: number;
+}
+
+async function collect(my: number, { items, inline, authuser, windowId, directTabId }: CollectInput): Promise<void> {
   state.phase = 'collecting';
   state.progress = { done: 0, total: items.length, label: 'Reading posts…' };
-  log(`Scanning ${items.length} post(s)`);
+  log(`Reading ${items.length} post(s)`);
   await save();
-
-  // Class scans open each post in a minimised window so tabs don't flash over the user's work.
-  let windowId: number | undefined;
-  if (directTabId == null) {
-    try {
-      const win = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
-      windowId = win?.id;
-    } catch (e) {
-      log(`Could not create scan window (${errorMessage(e)}); using background tabs`);
-    }
-  }
 
   const ctx: CollectContext = { seen: new Set(), folders: [], authuser };
   let next = 0;
@@ -242,7 +350,18 @@ async function collect(my: number, items: ScanItem[], authuser: string, directTa
     }
   };
   await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
-  if (windowId != null) chrome.windows.remove(windowId).catch(() => {});
+
+  // Attachments shown directly on pages come AFTER the posts, so a file that is also attached to a post
+  // keeps that post's topic instead of landing under "Announcements".
+  if (!isStopped(my)) {
+    let added = 0;
+    for (const { link, topic } of inline) {
+      // The class's own Drive folder (where submissions live) is not something a teacher attached.
+      if (/class drive folder/i.test(link.text)) continue;
+      added += addLink(ctx, { topic, post: topic ? 'Announcement' : '' }, link) ? 1 : 0;
+    }
+    if (inline.length) log(`Attachments shown on pages: ${inline.length} link(s), ${added} new`);
+  }
 
   if (!isStopped(my) && ctx.folders.length) await expandFolders(my, ctx);
 
@@ -262,6 +381,7 @@ async function scrapePost(item: ScanItem, windowId: number | undefined, directTa
     const [res] = await chrome.scripting.executeScript({ target: { tabId: directTabId }, func: scrapeAttachmentsInPage });
     return res?.result ?? [];
   }
+  if (!isClassroomUrl(item.url)) throw new Error('Not a Classroom page');
   const tab = await chrome.tabs.create({
     url: item.url,
     active: false,
@@ -363,6 +483,8 @@ function addLink(ctx: CollectContext, meta: LinkMeta, link: PageLink): boolean {
   const authuser = c.authuser || ctx.authuser;
 
   if (c.kind === 'form') {
+    if (ctx.seen.has(`form:${href}`)) return false;
+    ctx.seen.add(`form:${href}`);
     state.skipped.push({ post: meta.post, title: label || 'Google Form', reason: 'Google Form', href });
     return false;
   }

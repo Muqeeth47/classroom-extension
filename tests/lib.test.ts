@@ -3,6 +3,7 @@ import {
   buildFileName,
   classify,
   decodeEntities,
+  isClassroomUrl,
   downloadUrlFor,
   exportExtFor,
   filenameFromDisposition,
@@ -207,4 +208,14 @@ describe('describeHttpFailure', () => {
   ])('status %i', (status, re) => {
     expect(describeHttpFailure(status)).toMatch(re);
   });
+});
+
+test('isClassroomUrl only accepts real Classroom pages', () => {
+  expect(isClassroomUrl('https://classroom.google.com/c/ABC')).toBe(true);
+  expect(isClassroomUrl('https://classroom.google.com/u/1/w/ABC/t/all')).toBe(true);
+  expect(isClassroomUrl('http://classroom.google.com/c/ABC')).toBe(false); // not https
+  expect(isClassroomUrl('https://classroom.google.com.evil.example/c/ABC')).toBe(false); // look-alike host
+  expect(isClassroomUrl('https://evil.example/classroom.google.com/c/ABC')).toBe(false);
+  expect(isClassroomUrl('javascript:alert(1)')).toBe(false);
+  expect(isClassroomUrl('not a url')).toBe(false);
 });

@@ -252,6 +252,9 @@ export function pageKind(href: string): PageKind | null {
   return null;
 }
 
+/** Name used for files that sit directly on a class's Stream (announcements), as opposed to a Classwork topic. */
+export const ANNOUNCEMENTS_TOPIC = 'Announcements';
+
 /** The course id in a Classroom URL (/c/<id>/... or /w/<id>/...), if any. */
 export function courseIdFromPath(pathname: string): string | null {
   return pathname.match(/^\/(?:u\/\d+\/)?(?:c|w)\/([^/?#]+)/)?.[1] ?? null;
@@ -292,4 +295,14 @@ export function describeHttpFailure(status: number): string {
   if (status === 429) return 'Google is limiting downloads of this file right now. Try again later.';
   if (status >= 500) return `Google had a problem (HTTP ${status}). Try again later.`;
   return `Google refused the download (HTTP ${status}).`;
+}
+
+/** The worker opens pages in a hidden window. Whatever a page script reports, only real Classroom pages are opened. */
+export function isClassroomUrl(href: string): boolean {
+  try {
+    const u = new URL(href);
+    return u.protocol === 'https:' && u.hostname === 'classroom.google.com';
+  } catch {
+    return false;
+  }
 }

@@ -14,12 +14,12 @@ Chrome, Edge, Brave, Opera and Firefox, on Windows, macOS and Linux.
 
 Open the announcement or post whose files you want, click Ilm, press **Get files from this post**, then **Download**. Files land in `Downloads/Classroom/<name>/`.
 
-To save a whole class, open its **Classwork** tab and press **Get files from this class**.
+To save everything posted in a class (announcements, assignments and materials), open the class on its Stream or Classwork tab and press **Get files from this class**. It only ever reads that one class.
 
 - Uploaded files are saved exactly as they are. Google Docs, Slides and Sheets are exported as PDF or Word / PowerPoint / Excel (your choice).
 - Drive folders attached to posts are opened too.
 - Files with downloading disabled by their owner are skipped, not bypassed.
-- It runs in your browser with your own login and collects nothing. See the [privacy page](https://ilm-xi.vercel.app/privacy.html).
+- It runs in your browser with your own login and collects nothing. See the [privacy page](https://getilm.vercel.app/privacy.html).
 
 ## Develop
 

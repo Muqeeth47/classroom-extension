@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ilm - Classroom File Downloader",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Download all PDFs, documents and attachments from a Google Classroom post or class in one click. Original formats, no zip.",
   "minimum_chrome_version": "121",
   "permissions": [

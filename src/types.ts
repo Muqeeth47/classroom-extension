@@ -75,12 +75,19 @@ export interface ScanItem {
 /** What the user has open: a single post, or a class's Classwork list. Anything else is not scannable. */
 export type PageKind = 'post' | 'class';
 
+/** Which tab of a class a page is. Announcements live on the Stream; assignments and materials on Classwork. */
+export type ClassPage = 'stream' | 'classwork' | 'other';
+
 export interface ScanResult {
   mode: PageKind;
   className: string;
   items: ScanItem[];
   /** Which Google account (/u/N/) Classroom is open under, so files are fetched as the same account. */
   authuser?: string;
+  /** Class scans: which tab this page is. */
+  page?: ClassPage;
+  /** Class scans: the OTHER tab(s) of the same class (Stream <-> Classwork) so nothing is missed. */
+  siblings?: string[];
   error?: string;
 }
 
