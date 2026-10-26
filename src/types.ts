@@ -49,6 +49,8 @@ export interface DownloadFailure {
 
 export interface AppState {
   phase: Phase;
+  /** Which page the results came from (see sourceKey), so they are never shown against a different page. */
+  source?: string;
   className: string;
   progress: { done: number; total: number; label: string };
   files: FileEntry[];

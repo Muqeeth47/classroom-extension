@@ -27,6 +27,8 @@
     const base = { phase, className: 'Physics 12A', progress: { done: 7, total: 20, label: 'Energy and work' }, files: [], skipped: [], dl: { total: 5, done: 3, failed: 1, failures: [{ name: 'Diagram.png', reason: 'Download disabled by the owner, or no access with this account' }], lastId: 1, folder: 'Classroom/Physics 12A' }, log: ['10:00:01  Scanning 20 posts', '10:00:09  Done: 5 file(s), 1 skipped'], error: 'No posts found. Open the post or announcement whose files you want, or a class’s Classwork tab, and try again.' };
     if (phase === 'review') { base.files = files; base.skipped = [{ title: 'Exit ticket', reason: 'Google Form' }]; }
     if (phase === 'empty') { base.phase = 'review'; }
+    // &stale=1 -> these results came from a different class than the open tab
+    if (new URLSearchParams(location.search).get('stale')) base.source = 'class:SOME_OTHER_CLASS';
     // ?tab=class (default) | post | home | none  -> which page the fake active tab is on
     const tabKind = new URLSearchParams(location.search).get('tab') || 'class';
     const TAB_URLS = { class: 'https://classroom.google.com/c/ODc1NDc5MzU2Mjc5', post: 'https://classroom.google.com/c/ODc1NDc5MzU2Mjc5/m/ODcwMjA4MzI0ODE1/details', home: 'https://classroom.google.com/h/st', none: 'https://example.com/' };

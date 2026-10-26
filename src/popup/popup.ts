@@ -1,7 +1,7 @@
 // Popup UI. The background worker owns the real state; this renders it and sends commands.
 // Everything from Classroom (file names, topics) is untrusted, so it only ever goes in via textContent.
 
-import { EXPORT_KINDS, pageKind } from '../lib';
+import { EXPORT_KINDS, pageKind, sourceKey } from '../lib';
 import { freshState } from '../state';
 import type { AppState, DocFormat, FileEntry, Message, PageKind, Prefs } from '../types';
 
@@ -13,6 +13,7 @@ const app = document.getElementById('app')!;
 let state: AppState | null = null; // mirror of the background state
 let tab: chrome.tabs.Tab | null = null; // the active tab, if it is a Classroom class or post
 let kind: PageKind | null = null; // what that tab is showing
+let currentKey: string | null = null; // identity of the page that tab is showing (see sourceKey)
 let hasAccess = true; // Firefox asks for site access separately; Chromium grants it at install
 let className: string | null = null; // folder name being edited in the review step
 const unticked = new Set<string>(); // file keys the user turned off
@@ -76,6 +77,7 @@ async function detectContext(): Promise<void> {
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   kind = active?.url ? pageKind(active.url) : null;
   tab = kind ? (active ?? null) : null;
+  currentKey = active?.url ? sourceKey(active.url) : null;
 }
 
 function progressBar(done: number, total: number): HTMLElement {
@@ -145,13 +147,16 @@ function viewIdle(): HTMLElement[] {
   ];
 }
 
-function viewBusy(s: AppState): HTMLElement[] {
+function viewBusy(s: AppState): (HTMLElement | null)[] {
   const { done, total, label } = s.progress;
   const scanning = s.phase === 'scanning';
   return [
     h('p', { text: scanning ? 'Reading the page…' : total > 1 ? `Reading posts… ${done} of ${total}` : 'Finding files…' }),
     progressBar(scanning ? 0 : done, total),
     h('p', { class: 'muted small', text: label }),
+    s.progress.total > 1 || scanning
+      ? h('p', { class: 'muted small', text: 'Pages open briefly in background tabs while they are read, then close. You can close this popup; the icon shows progress.' })
+      : null,
     h('button', { class: 'block', text: 'Cancel', onclick: () => void send({ type: 'CANCEL' }) }),
   ];
 }
@@ -273,6 +278,7 @@ function viewDownloading(s: AppState): HTMLElement[] {
     h('p', { text: `Downloading… ${done + failed} of ${total}` }),
     progressBar(done + failed, total),
     failed ? h('p', { class: 'warn small', text: `${plural(failed, 'file')} could not be downloaded` }) : null,
+    h('p', { class: 'muted small', text: 'If your browser opens a save window for each file, turn off \u201cAsk where to save each file before downloading\u201d in its download settings.' }),
     h('button', { class: 'block', text: 'Stop', onclick: () => void send({ type: 'CANCEL' }) }),
   ].filter((x): x is HTMLElement => x !== null);
 }
@@ -303,6 +309,31 @@ function viewError(s: AppState): (HTMLElement | null)[] {
   ];
 }
 
+/** Results that were collected from a different page than the one open now must never pass as this page's. */
+function otherPageNotice(s: AppState): HTMLElement | null {
+  const finished = s.phase === 'review' || s.phase === 'done' || s.phase === 'error';
+  if (!finished || !s.source || !currentKey || s.source === currentKey) return null;
+  return h('div', { class: 'card stack' },
+    h('p', { class: 'warn', text: `These results are from ${s.className ? `\u201c${s.className}\u201d` : 'another page'}, not the page you have open now.` }),
+    tab && kind
+      ? h('button', {
+          class: 'primary block',
+          text: kind === 'post' ? 'Scan this post instead' : 'Scan this class instead',
+          onclick: async () => {
+            const tabId = tab?.id;
+            const mode = kind;
+            if (tabId == null || !mode) return;
+            await send({ type: 'RESET' });
+            className = null;
+            unticked.clear();
+            await send({ type: 'START', tabId, mode });
+            await refresh();
+          },
+        })
+      : h('p', { class: 'muted small', text: 'Open a post or a class to scan it.' }),
+  );
+}
+
 function render(): void {
   if (!state) return;
   const s = state;
@@ -316,14 +347,14 @@ function render(): void {
     error: () => viewError(s),
   };
   const keep = app.querySelector('.list')?.scrollTop ?? 0;
-  app.replaceChildren(...views[s.phase]().filter((x): x is HTMLElement => x !== null));
+  app.replaceChildren(...[otherPageNotice(s), ...views[s.phase]()].filter((x): x is HTMLElement => x !== null));
   const list = app.querySelector('.list');
   if (list) list.scrollTop = keep;
 }
 
 async function refresh(): Promise<void> {
   state = (await send<AppState>({ type: 'GET_STATE' })) ?? unavailableState();
-  if (state.phase === 'idle') await detectContext();
+  await detectContext();
   render();
 }
 

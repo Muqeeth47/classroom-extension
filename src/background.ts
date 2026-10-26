@@ -5,7 +5,9 @@
 
 import {
   ANNOUNCEMENTS_TOPIC,
+  badgeFor,
   isClassroomUrl,
+  sourceKey,
   buildDownloadPath,
   buildFileName,
   classify,
@@ -16,6 +18,7 @@ import {
   unwrapGoogleRedirect,
 } from './lib';
 import { freshState } from './state';
+import { scrapeAttachmentsInPage } from './scrape';
 import type { AppState, DocFormat, FileEntry, Message, PageKind, PageLink, ScanItem, ScanResult } from './types';
 
 const ROOT_FOLDER = 'Classroom';
@@ -53,6 +56,7 @@ const ready = (async () => {
   } catch {
     /* storage.session unavailable: start fresh */
   }
+  void updateBadge();
 })();
 
 async function save(): Promise<void> {
@@ -60,6 +64,18 @@ async function save(): Promise<void> {
     await chrome.storage.session.set({ state });
   } catch {
     /* non-fatal */
+  }
+  void updateBadge();
+}
+
+/** Shows progress on the toolbar icon, so the user can close the popup and still see what Ilm is doing. */
+async function updateBadge(): Promise<void> {
+  try {
+    const { text, color } = badgeFor(state);
+    await chrome.action.setBadgeText({ text });
+    if (text) await chrome.action.setBadgeBackgroundColor({ color });
+  } catch {
+    /* a missing badge must never stop a download */
   }
 }
 
@@ -78,6 +94,12 @@ function stopKeepAlive(): void {
 }
 
 const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** " [a.pdf, b.pptx, ...]": the first few link names, for the Activity log. */
+function sample(links: PageLink[]): string {
+  const names = links.slice(0, 4).map((l) => (l.text.split('\n')[0] || l.href).slice(0, 40));
+  return names.length ? ` [${names.join(', ')}${links.length > names.length ? ', ...' : ''}]` : '';
+}
 
 // ---------------------------------------------------------------- messages
 
@@ -158,6 +180,9 @@ async function start(tabId: number, mode: PageKind): Promise<void> {
   startKeepAlive();
   let windowId: number | undefined;
   try {
+    const here = await chrome.tabs.get(tabId).catch(() => undefined);
+    const source = here?.url ? sourceKey(here.url) : null;
+    if (source) state.source = source;
     await save();
     const scan = await requestScan(tabId, mode);
     if (isStopped(my)) return finishStopped(my);
@@ -175,8 +200,8 @@ async function start(tabId: number, mode: PageKind): Promise<void> {
     }
 
     // A class: read its Stream AND its Classwork (whichever one the user is on, plus the other), each
-    // post in a minimised window so nothing flashes over the user's work.
-    windowId = await openScanWindow();
+    // post in a background tab of the window the user already has open.
+    windowId = here?.windowId;
     const plan = await gatherClass(my, tabId, scan, windowId);
     if (isStopped(my)) return finishStopped(my);
     if (!plan.items.length && !plan.inline.length) {
@@ -185,8 +210,6 @@ async function start(tabId: number, mode: PageKind): Promise<void> {
     await collect(my, { ...plan, authuser, windowId });
   } catch (e) {
     await fail(e, my);
-  } finally {
-    if (windowId != null) chrome.windows.remove(windowId).catch(() => {});
   }
 }
 
@@ -196,16 +219,6 @@ async function finishStopped(my: number): Promise<void> {
   stopKeepAlive();
   state = freshState();
   await save();
-}
-
-async function openScanWindow(): Promise<number | undefined> {
-  try {
-    const win = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
-    return win?.id;
-  } catch (e) {
-    log(`Could not create scan window (${errorMessage(e)}); using background tabs`);
-    return undefined;
-  }
 }
 
 /** Attachments shown directly on a page (for example inside announcements on the Stream). */
@@ -269,8 +282,23 @@ async function gatherClass(my: number, tabId: number, scan: ScanResult, windowId
   return { items: [...byUrl.values()], inline };
 }
 
+/**
+ * A background tab in the window the user is in. If that window can't hold tabs (an app or popup window), let the
+ * browser pick instead of failing; the tab still opens inactive so it never takes focus.
+ */
+async function openBackgroundTab(url: string, windowId: number | undefined): Promise<chrome.tabs.Tab> {
+  if (windowId != null) {
+    try {
+      return await chrome.tabs.create({ url, active: false, windowId });
+    } catch {
+      /* fall through */
+    }
+  }
+  return chrome.tabs.create({ url, active: false });
+}
+
 async function scanSiblingPage(url: string, windowId: number | undefined): Promise<{ scan: ScanResult; inline: PageLink[] }> {
-  const tab = await chrome.tabs.create({ url, active: false, ...(windowId != null ? { windowId } : {}) });
+  const tab = await openBackgroundTab(url, windowId);
   const id = tab.id;
   if (id == null) throw new Error('Could not open the page');
   try {
@@ -339,7 +367,7 @@ async function collect(my: number, { items, inline, authuser, windowId, directTa
         if (isStopped(my)) return;
         let added = 0;
         for (const link of found) added += addLink(ctx, { topic: item.topic, post: item.title }, link) ? 1 : 0;
-        log(`${item.title || item.url}: ${found.length} link(s), ${added} new`);
+        log(`${item.title || item.url}: ${found.length} link(s), ${added} new${sample(found)}`);
       } catch (e) {
         if (isStopped(my)) return;
         log(`Failed on "${item.title}": ${errorMessage(e)}`);
@@ -382,11 +410,7 @@ async function scrapePost(item: ScanItem, windowId: number | undefined, directTa
     return res?.result ?? [];
   }
   if (!isClassroomUrl(item.url)) throw new Error('Not a Classroom page');
-  const tab = await chrome.tabs.create({
-    url: item.url,
-    active: false,
-    ...(windowId != null ? { windowId } : {}),
-  });
+  const tab = await openBackgroundTab(item.url, windowId);
   const tabId = tab.id;
   if (tabId == null) return [];
   try {
@@ -428,47 +452,6 @@ function waitForComplete(tabId: number, timeoutMs: number): Promise<void> {
       })
       .catch(() => {});
   });
-}
-
-/**
- * Runs INSIDE the Classroom post page (injected via scripting.executeScript), so it must be
- * fully self-contained: no imports, no references to anything outside this function.
- * Classroom renders attachments client-side, so poll until the links appear and stop changing.
- */
-async function scrapeAttachmentsInPage(): Promise<{ href: string; text: string }[]> {
-  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-  const pick = () => {
-    const out: { href: string; text: string }[] = [];
-    const seen = new Set<string>();
-    for (const a of document.querySelectorAll<HTMLAnchorElement>('a[href]')) {
-      const href = a.href;
-      if (!/^https:\/\/(drive|docs|www)\.google\.com\//.test(href)) continue;
-      if (a.closest('header, [role="banner"], [role="navigation"], nav')) continue;
-      if (seen.has(href)) continue;
-      seen.add(href);
-      out.push({ href, text: (a.getAttribute('aria-label') || a.innerText || '').trim() });
-    }
-    return out;
-  };
-
-  const start = Date.now();
-  let lastCount = -1;
-  let stableSince = 0;
-  while (Date.now() - start < 9000) {
-    const found = pick();
-    if (found.length) {
-      if (found.length === lastCount) {
-        if (Date.now() - stableSince > 1200) break;
-      } else {
-        lastCount = found.length;
-        stableSince = Date.now();
-      }
-    } else if (Date.now() - start > 5000 && document.readyState === 'complete') {
-      break; // nothing showed up: probably a post with no attachments
-    }
-    await sleep(300);
-  }
-  return pick();
 }
 
 /**

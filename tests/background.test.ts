@@ -10,7 +10,11 @@ const listeners: { message: Fn[]; dlChanged: Fn[] } = { message: [], dlChanged: 
 const downloads: { id: number; url: string; filename: string; conflictAction?: string }[] = [];
 const session: { state?: AppState } = {};
 let nextId = 1;
-const calls = { tabsCreate: 0, windowsCreate: 0 };
+const calls = { tabsCreate: 0, windowsCreate: 0, windowsRemove: 0 };
+const tabWindowIds: (number | undefined)[] = []; // which window each background tab was opened in
+const USER_WINDOW = 5; // the window the user already has open
+const badgeLog: string[] = []; // every text shown on the toolbar icon, in order
+let userWindowRejectsTabs = false; // e.g. the user is in an app or popup window that cannot hold tabs
 
 /** Links "found on the page", keyed by the url of a post opened in a background tab. */
 const POSTS: Record<string, PageLink[]> = {
@@ -61,12 +65,26 @@ const fakeChrome = {
     onMessage: { addListener: (fn: Fn) => listeners.message.push(fn) },
     getPlatformInfo: async () => ({}),
   },
-  windows: { create: async () => (calls.windowsCreate++, { id: 99 }), remove: async () => {} },
+  action: {
+    setBadgeText: async ({ text }: { text: string }) => void badgeLog.push(text),
+    setBadgeBackgroundColor: async () => {},
+  },
+  windows: { create: async () => (calls.windowsCreate++, { id: 99 }), remove: async () => void calls.windowsRemove++ },
   tabs: {
     // The fake tab id is its URL so the fake scripting API below can look the "page" up.
-    create: async ({ url }: { url: string }) => (calls.tabsCreate++, { id: url, url, status: 'complete' }),
+    create: async ({ url, windowId }: { url: string; windowId?: number }) => {
+      if (userWindowRejectsTabs && windowId != null) throw new Error('Tabs can only be created in normal windows');
+      calls.tabsCreate++;
+      tabWindowIds.push(windowId);
+      return { id: url, url, status: 'complete' };
+    },
     remove: async () => {},
-    get: async (id: unknown) => ({ id, status: 'complete' }),
+    get: async (id: unknown) => ({
+      id,
+      status: 'complete',
+      windowId: USER_WINDOW,
+      url: id === OPEN_POST_TAB ? 'https://classroom.google.com/c/C1/m/P9/details' : id === 1 ? 'https://classroom.google.com/c/C1' : String(id),
+    }),
     onUpdated: { addListener() {}, removeListener() {} },
     sendMessage: async (tabId: number | string, msg: { mode: string }) => {
       if (typeof tabId === 'string') {
@@ -182,6 +200,9 @@ beforeEach(async () => {
   injectThrows = false;
   scanOverride = null;
   stallDownloads = false;
+  tabWindowIds.length = 0;
+  badgeLog.length = 0;
+  userWindowRejectsTabs = false;
   currentTabLinks = [];
   for (const k of Object.keys(siblingScans)) delete siblingScans[k];
   openPostLinks = [];
@@ -526,3 +547,63 @@ describe('whole class: announcements, assignments and materials', () => {
     }
   });
 });
+
+// ---- where pages are read, and which page results belong to -------------------------------
+describe('no extra windows, and results stay with their page', () => {
+  test('a class is read in background tabs of the user\'s own window, never a new or minimised window', async () => {
+    const created = calls.windowsCreate;
+    const removed = calls.windowsRemove;
+    const sibling = 'https://classroom.google.com/c/C1';
+    siblingScans[sibling] = { mode: 'class', className: '', page: 'stream', items: [] };
+    scanOverride = { ...classScan(), page: 'classwork', siblings: [sibling] };
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    await until((x) => x.phase === 'review', 'review');
+
+    expect(calls.windowsCreate).toBe(created); // Linux window managers may ignore "minimised", so none is created
+    expect(calls.windowsRemove).toBe(removed); // and the user's own window is never closed
+    expect(tabWindowIds.length).toBeGreaterThan(0);
+    expect(tabWindowIds.every((id) => id === USER_WINDOW)).toBe(true);
+  });
+
+  test('results remember the page they came from', async () => {
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    expect((await until((x) => x.phase === 'review', 'review')).source).toBe('class:C1');
+
+    await send({ type: 'RESET' });
+    const post = await scanPost([{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }]);
+    expect(post.source).toBe('post:C1/P9');
+  });
+});
+
+describe('the toolbar icon and unusual windows', () => {
+  test('the icon shows progress, the file count, and the result, so the popup can stay closed', async () => {
+    const review = await scanPost([
+      { href: 'https://drive.google.com/file/d/FILE9/view', text: 'a.pdf' },
+      { href: 'https://drive.google.com/file/d/FILE1/view', text: 'b.pdf' },
+    ]);
+    expect(badgeLog).toContain('...'); // while reading
+    expect(badgeLog.at(-1)).toBe('2'); // two files ready to choose
+
+    await downloadAll(review);
+    expect(badgeLog.at(-1)).toBe('OK'); // finished cleanly
+
+    await send({ type: 'RESET' });
+    expect(badgeLog.at(-1)).toBe(''); // back to nothing
+  });
+
+  test('a failure is flagged on the icon', async () => {
+    const review = await scanPost([{ href: 'https://drive.google.com/file/d/NETFAIL/view', text: 'a' }]);
+    await downloadAll(review);
+    expect(badgeLog.at(-1)).toBe('!');
+  });
+
+  test('if the user\'s own window cannot hold tabs, pages are still read (tabs open anywhere, never stealing focus)', async () => {
+    userWindowRejectsTabs = true;
+    scanOverride = { ...classScan(), page: 'classwork', siblings: [] };
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const s = await until((x) => x.phase === 'review', 'review');
+    expect(s.files.map((f) => f.key)).toEqual(expect.arrayContaining(['file:FILE1', 'document:DOC1']));
+    expect(tabWindowIds.every((id) => id === undefined)).toBe(true); // browser chose the window
+  });
+});
+

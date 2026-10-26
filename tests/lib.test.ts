@@ -3,6 +3,8 @@ import {
   buildFileName,
   classify,
   decodeEntities,
+  badgeFor,
+  sourceKey,
   isClassroomUrl,
   downloadUrlFor,
   exportExtFor,
@@ -218,4 +220,48 @@ test('isClassroomUrl only accepts real Classroom pages', () => {
   expect(isClassroomUrl('https://evil.example/classroom.google.com/c/ABC')).toBe(false);
   expect(isClassroomUrl('javascript:alert(1)')).toBe(false);
   expect(isClassroomUrl('not a url')).toBe(false);
+});
+
+describe('sourceKey', () => {
+  test('a post and a class have different, stable identities', () => {
+    expect(sourceKey('https://classroom.google.com/c/ABC/m/DEF/details')).toBe('post:ABC/DEF');
+    expect(sourceKey('https://classroom.google.com/u/2/c/ABC/p/POST1')).toBe('post:ABC/POST1');
+    expect(sourceKey('https://classroom.google.com/c/ABC')).toBe('class:ABC');
+    expect(sourceKey('https://classroom.google.com/w/ABC/t/all')).toBe('class:ABC');
+  });
+
+  test('the Stream and Classwork tabs of one class are the same source; another class is not', () => {
+    expect(sourceKey('https://classroom.google.com/c/ABC')).toBe(sourceKey('https://classroom.google.com/w/ABC/t/all'));
+    expect(sourceKey('https://classroom.google.com/c/ABC')).not.toBe(sourceKey('https://classroom.google.com/c/XYZ'));
+  });
+
+  test('pages that are not a post or a class have none', () => {
+    expect(sourceKey('https://classroom.google.com/h')).toBeNull();
+    expect(sourceKey('https://example.com/c/ABC')).toBeNull();
+    expect(sourceKey('not a url')).toBeNull();
+  });
+});
+
+describe('badgeFor', () => {
+  const base = { files: [], dl: { total: 0, done: 0, failed: 0, failures: [], lastId: null, folder: '' } };
+
+  test('working, ready, downloading, finished and failed each look different', () => {
+    expect(badgeFor({ ...base, phase: 'scanning' }).text).toBe('...');
+    expect(badgeFor({ ...base, phase: 'collecting' }).text).toBe('...');
+    expect(badgeFor({ ...base, phase: 'idle' }).text).toBe('');
+    expect(badgeFor({ ...base, phase: 'error' }).text).toBe('!');
+    expect(badgeFor({ ...base, phase: 'done' }).text).toBe('OK');
+    expect(badgeFor({ ...base, phase: 'done', dl: { ...base.dl, failed: 1 } }).text).toBe('!');
+  });
+
+  test('shows how many files are ready, capped so it fits the icon', () => {
+    const files = (n: number) => Array.from({ length: n }, () => ({}) as never);
+    expect(badgeFor({ ...base, phase: 'review', files: files(7) }).text).toBe('7');
+    expect(badgeFor({ ...base, phase: 'review', files: files(1500) }).text).toBe('999+');
+  });
+
+  test('counts down the files still to download, never below zero', () => {
+    expect(badgeFor({ ...base, phase: 'downloading', dl: { ...base.dl, total: 10, done: 4, failed: 1 } }).text).toBe('5');
+    expect(badgeFor({ ...base, phase: 'downloading', dl: { ...base.dl, total: 2, done: 3, failed: 0 } }).text).toBe('0');
+  });
 });

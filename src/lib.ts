@@ -1,6 +1,6 @@
 // Pure helpers shared by the background worker and the tests. No browser-API calls here.
 
-import type { Classified, DocFormat, FileKind, Kind, PageKind } from './types';
+import type { AppState, Classified, DocFormat, FileKind, Kind, PageKind } from './types';
 
 const BAD_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g;
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
@@ -304,5 +304,52 @@ export function isClassroomUrl(href: string): boolean {
     return u.protocol === 'https:' && u.hostname === 'classroom.google.com';
   } catch {
     return false;
+  }
+}
+
+/**
+ * A stable identity for what a Classroom page is about: one post ("post:<course>/<id>") or one class
+ * ("class:<course>"). Used to tell whether stored results belong to the page the user has open now.
+ */
+export function sourceKey(href: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.hostname !== 'classroom.google.com') return null;
+  const post = u.pathname.match(/^\/(?:u\/\d+\/)?c\/([^/]+)\/(?:a|m|sp|qs|p)\/([^/?#]+)/);
+  if (post) return `post:${post[1]}/${post[2]}`;
+  const course = courseIdFromPath(u.pathname);
+  return course ? `class:${course}` : null;
+}
+
+// ---------------------------------------------------------------- toolbar badge
+
+export interface Badge {
+  text: string;
+  color: string;
+}
+
+/**
+ * The little label on the extension's toolbar icon. A popup closes the moment it loses focus, so this is how
+ * the user can tell, with the popup closed, that Ilm is working, ready, or finished.
+ */
+export function badgeFor(s: Pick<AppState, 'phase' | 'files' | 'dl'>): Badge {
+  switch (s.phase) {
+    case 'scanning':
+    case 'collecting':
+      return { text: '...', color: '#555555' };
+    case 'review':
+      return { text: s.files.length > 999 ? '999+' : String(s.files.length), color: '#1a73e8' }; // ready to choose
+    case 'downloading':
+      return { text: String(Math.max(0, s.dl.total - s.dl.done - s.dl.failed)), color: '#555555' };
+    case 'done':
+      return s.dl.failed ? { text: '!', color: '#b3261e' } : { text: 'OK', color: '#137333' };
+    case 'error':
+      return { text: '!', color: '#b3261e' };
+    default:
+      return { text: '', color: '#000000' };
   }
 }
