@@ -23,7 +23,7 @@ export async function scrapeAttachmentsInPage(): Promise<{ href: string; text: s
     if (getComputedStyle(el).visibility === 'hidden') return true;
     const r = el.getBoundingClientRect();
     // A closed side menu is usually slid off the edge of the screen rather than removed.
-    return r.width > 0 && (r.right <= 0 || r.left >= window.innerWidth);
+    return r.width > 0 && window.innerWidth > 0 && (r.right <= 0 || r.left >= window.innerWidth);
   };
 
   const pick = () => {

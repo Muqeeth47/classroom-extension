@@ -93,3 +93,32 @@ describe('only the post\'s own attachments are returned', () => {
     expect(await read()).toEqual([]);
   });
 });
+
+describe('layout-based hiding', () => {
+  const rect = (left: number, right: number) => () => ({ width: right - left, height: 20, left, right, top: 0, bottom: 20, x: left, y: 0, toJSON() {} }) as DOMRect;
+  const original = Element.prototype.getBoundingClientRect;
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = original;
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true });
+  });
+
+  test('a link slid off the left edge (a closed side menu) is ignored', async () => {
+    document.body.innerHTML = `<main>${file('F1', 'a.pdf')}</main>`;
+    Element.prototype.getBoundingClientRect = rect(-600, -200);
+    expect(await read()).toEqual([]);
+  });
+
+  test('a link on screen is kept', async () => {
+    document.body.innerHTML = `<main>${file('F1', 'a.pdf')}</main>`;
+    Element.prototype.getBoundingClientRect = rect(100, 400);
+    expect(await read()).toHaveLength(1);
+  });
+
+  test('a tab that reports a zero width must not hide every attachment', async () => {
+    document.body.innerHTML = `<main>${attachments}</main>`;
+    Object.defineProperty(window, 'innerWidth', { value: 0, configurable: true });
+    Element.prototype.getBoundingClientRect = rect(100, 400);
+    expect(await read()).toHaveLength(13);
+  });
+});
+

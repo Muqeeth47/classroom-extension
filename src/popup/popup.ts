@@ -14,6 +14,7 @@ let state: AppState | null = null; // mirror of the background state
 let tab: chrome.tabs.Tab | null = null; // the active tab, if it is a Classroom class or post
 let kind: PageKind | null = null; // what that tab is showing
 let currentKey: string | null = null; // identity of the page that tab is showing (see sourceKey)
+let onClassroom = false; // is the open tab on classroom.google.com at all (home, to-do...), even if not a post or class?
 let hasAccess = true; // Firefox asks for site access separately; Chromium grants it at install
 let className: string | null = null; // folder name being edited in the review step
 const unticked = new Set<string>(); // file keys the user turned off
@@ -78,6 +79,11 @@ async function detectContext(): Promise<void> {
   kind = active?.url ? pageKind(active.url) : null;
   tab = kind ? (active ?? null) : null;
   currentKey = active?.url ? sourceKey(active.url) : null;
+  try {
+    onClassroom = !!active?.url && new URL(active.url).hostname === 'classroom.google.com';
+  } catch {
+    onClassroom = false;
+  }
 }
 
 function progressBar(done: number, total: number): HTMLElement {
@@ -100,8 +106,10 @@ async function reset(): Promise<void> {
 
 // ---------------------------------------------------------------- views
 
-function viewIdle(): HTMLElement[] {
-  if (!hasAccess) {
+function viewIdle(): (HTMLElement | null)[] {
+  // If the open Classroom tab is readable we already have access to it (e.g. site access set to "on click"),
+  // so only ask when we can see nothing at all.
+  if (!hasAccess && !kind) {
     return [
       h('p', { text: 'This extension needs permission to read Google Classroom and Drive so it can find and download your files.' }),
       h('button', {
@@ -122,10 +130,18 @@ function viewIdle(): HTMLElement[] {
   if (!tab || !kind) {
     return [
       h('div', { class: 'card stack' },
-        h('p', { text: 'Open the announcement or post whose files you want to download.' }),
-        h('p', { class: 'muted small', text: 'Then click this button again. Or open a class (its Stream or Classwork tab) to get everything posted in it.' }),
+        h('p', { text: onClassroom ? 'Open a class, or the announcement or post whose files you want to download.' : 'This is not a Google Classroom page.' }),
+        h('p', {
+          class: 'muted small',
+          text: onClassroom
+            ? 'The home page lists every class, so ilm. waits for you to pick one. Then click this button again.'
+            : 'Open Google Classroom, then open the announcement or post whose files you want. Or open a class to get everything posted in it.',
+        }),
       ),
-      h('button', { class: 'primary block', text: 'Find files', disabled: true }),
+      onClassroom
+        ? null
+        : h('button', { class: 'primary block', text: 'Open Google Classroom', onclick: () => void chrome.tabs.create({ url: 'https://classroom.google.com/' }) }),
+      h('button', { class: 'block', text: 'Find files', disabled: true }),
     ];
   }
   const tabId = tab.id;

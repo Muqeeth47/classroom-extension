@@ -7,6 +7,7 @@ import {
   ANNOUNCEMENTS_TOPIC,
   badgeFor,
   isClassroomUrl,
+  pageKind,
   sourceKey,
   buildDownloadPath,
   buildFileName,
@@ -153,6 +154,7 @@ async function fail(err: unknown, my: number): Promise<void> {
 // ---------------------------------------------------------------- scanning + collecting
 
 const NO_PAGE = 'Could not read the Classroom page. Reload it, then try again.';
+const NOT_CLASSROOM = 'This is not a Google Classroom post or class. Open one in Google Classroom, then try again.';
 
 async function requestScan(tabId: number, mode: PageKind): Promise<ScanResult> {
   const ask = () => chrome.tabs.sendMessage(tabId, { type: 'SCAN', mode }) as Promise<ScanResult | undefined>;
@@ -172,15 +174,22 @@ async function requestScan(tabId: number, mode: PageKind): Promise<ScanResult> {
   return res;
 }
 
-async function start(tabId: number, mode: PageKind): Promise<void> {
+async function start(tabId: number, requested: PageKind): Promise<void> {
   const my = ++run;
+  let mode: PageKind = requested;
   state = freshState();
   state.phase = 'scanning';
-  state.progress = { done: 0, total: 0, label: mode === 'post' ? 'Reading this post…' : 'Reading this class…' };
+  state.progress = { done: 0, total: 0, label: requested === 'post' ? 'Reading this post…' : 'Reading this class…' };
   startKeepAlive();
   let windowId: number | undefined;
   try {
     const here = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (here?.url) {
+      // The page may have changed since the popup was opened: trust what the tab shows now.
+      const actual = pageKind(here.url);
+      if (!actual) throw new Error(NOT_CLASSROOM);
+      mode = actual;
+    }
     const source = here?.url ? sourceKey(here.url) : null;
     if (source) state.source = source;
     await save();
@@ -383,12 +392,20 @@ async function collect(my: number, { items, inline, authuser, windowId, directTa
   // keeps that post's topic instead of landing under "Announcements".
   if (!isStopped(my)) {
     let added = 0;
+    let folders = 0;
     for (const { link, topic } of inline) {
       // The class's own Drive folder (where submissions live) is not something a teacher attached.
       if (/class drive folder/i.test(link.text)) continue;
+      // A folder is only opened when it is attached to a post that was read. On a page it could just as
+      // well be a class folder, which holds students' work and must never be pulled in.
+      if (classify(unwrapGoogleRedirect(link.href))?.kind === 'folder') {
+        folders++;
+        continue;
+      }
       added += addLink(ctx, { topic, post: topic ? 'Announcement' : '' }, link) ? 1 : 0;
     }
     if (inline.length) log(`Attachments shown on pages: ${inline.length} link(s), ${added} new`);
+    if (folders) log(`Ignored ${folders} Drive folder link(s) shown directly on pages; folders are opened only when attached to a post`);
   }
 
   if (!isStopped(my) && ctx.folders.length) await expandFolders(my, ctx);

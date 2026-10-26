@@ -83,7 +83,12 @@ const fakeChrome = {
       id,
       status: 'complete',
       windowId: USER_WINDOW,
-      url: id === OPEN_POST_TAB ? 'https://classroom.google.com/c/C1/m/P9/details' : id === 1 ? 'https://classroom.google.com/c/C1' : String(id),
+      url:
+        id === OPEN_POST_TAB ? 'https://classroom.google.com/c/C1/m/P9/details'
+        : id === 1 ? 'https://classroom.google.com/c/C1'
+        : id === 88 ? 'https://example.com/'
+        : id === 89 ? 'https://classroom.google.com/h/st'
+        : String(id),
     }),
     onUpdated: { addListener() {}, removeListener() {} },
     sendMessage: async (tabId: number | string, msg: { mode: string }) => {
@@ -604,6 +609,49 @@ describe('the toolbar icon and unusual windows', () => {
     const s = await until((x) => x.phase === 'review', 'review');
     expect(s.files.map((f) => f.key)).toEqual(expect.arrayContaining(['file:FILE1', 'document:DOC1']));
     expect(tabWindowIds.every((id) => id === undefined)).toBe(true); // browser chose the window
+  });
+});
+
+describe('not on a Classroom post or class', () => {
+  test.each([
+    ['an ordinary website', 88],
+    ['the Classroom home / to-do page, which lists every class', 89],
+  ])('%s: nothing is scanned and the user is told what to open', async (_label, tabId) => {
+    const tabsBefore = calls.tabsCreate;
+    await send({ type: 'START', tabId, mode: 'class' });
+    const s = await until((x) => x.phase === 'error', 'error');
+    expect(s.error).toMatch(/not a Google Classroom post or class/i);
+    expect(calls.tabsCreate).toBe(tabsBefore); // no page was opened
+    expect(s.files).toHaveLength(0);
+  });
+
+  test('the page can change after the popup opened: what the tab shows now decides, not what was asked', async () => {
+    // The popup thought "class", but tab 77 is now a single post: it must be read as that one post, in place.
+    const tabsBefore = calls.tabsCreate;
+    openPostLinks = [{ href: 'https://drive.google.com/file/d/FILE9/view', text: 'x.pdf' }];
+    await send({ type: 'START', tabId: OPEN_POST_TAB, mode: 'class' });
+    const s = await until((x) => x.phase === 'review', 'review');
+    expect(s.files.map((f) => f.key)).toEqual(['file:FILE9']);
+    expect(calls.tabsCreate).toBe(tabsBefore);
+  });
+
+  test('a Drive folder shown directly on a page is never opened (a class folder holds students\' work)', async () => {
+    currentTabLinks = [
+      { href: 'https://drive.google.com/drive/folders/STREAMFOLDER', text: 'Some folder' },
+      { href: 'https://drive.google.com/file/d/ANNFILE/view', text: 'Syllabus.pdf' },
+    ];
+    scanOverride = { mode: 'class', className: 'Art', page: 'stream', items: [], siblings: [] };
+    await send({ type: 'START', tabId: 1, mode: 'class' });
+    const s = await until((x) => x.phase === 'review', 'review');
+    expect(s.files.map((f) => f.key)).toEqual(['file:ANNFILE']);
+    expect(fetched.some((u) => u.includes('embeddedfolderview') && u.includes('STREAMFOLDER'))).toBe(false);
+    expect(s.log.join('\n')).toMatch(/Ignored 1 Drive folder link/);
+  });
+
+  test('a folder attached to a post IS still opened', async () => {
+    await send({ type: 'START', tabId: 1, mode: 'class' }); // the default class has a post with a "Reading pack" folder
+    const s = await until((x) => x.phase === 'review', 'review');
+    expect(s.files.some((f) => f.id === 'F2' && f.sub[0] === 'Reading pack')).toBe(true);
   });
 });
 
